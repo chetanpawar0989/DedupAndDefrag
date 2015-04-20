@@ -12,6 +12,7 @@ import logging
 import os
 import time
 import datetime
+import cStringIO
 from errno import *
 
 SUCCSS, FAIL = 0, -1
@@ -46,15 +47,17 @@ class dedupeEncFS(fuse.Fuse):
     try: 
       fuse.Fuse.__init__(self, *args, **kw)
       
-      self.blockSize = 1024 * 128     #setting default block size
-      self.dataBuffer = {}    #contains key-value pair of {path:data} of all blocks
+      self.DefaultBlockSize = 1024 * 128     #setting default block size
+      self.dataBuffer = {}    #contains key-value pair of {path:buffer data} of all blocks
       self.blockDatabase = '~/.datastore.db'
       self.metaDatabase = '~/.metadata.sqlite3'
       self.logFile = '~/FS.log'
       self.dedupeLogFile = '~/dedupeFileList.txt'
       self.link_mode = stat.S_IFLNK | 0777
       self.nodes = {}
-      self.__NODE_KEY = 0
+      self.cache_key = 0
+      self.defaulFolderSize = 1024 * 4    #Default folder size = 4kb when created
+      self.defaultFileSize = 0            #Default file size = 0kb when created
 
       #creating logs of activities
       self.logger = logging.getLogger('dedupeEncFS')
@@ -191,7 +194,7 @@ class dedupeEncFS(fuse.Fuse):
       self.__logMessage(msg)
 
       if not os.access(path, os.F_OK):
-        inodeNum, parentINodeNum = self.__insertNewNode(path, mode, 0)
+        inodeNum, parentINodeNum = self.__insertNewNode(path, mode, self.defaultFileSize)
         res = self.open(path, flags, inodeNum)
 
       if res == SUCCSS:
@@ -233,13 +236,293 @@ class dedupeEncFS(fuse.Fuse):
 
 
   
-  
+  def getattr(sef, path):
+    """
+    Called when stat, fstat, lstat done
+    """
+    try:
+      msg = "getattr() called at " + str(datetime.datetime.now())
+      self.__logMessage(msg)
+
+      inodeNum = self.__getHidAndInode(path)[1]
+      query = 'SELECT inodeNum, nlink, mode, uid, gid, dev, size, atime, mtime, ctime FROM inodes WHERE inode = ?'
+      res = self.conn.execute(query, (inode,)).fetchone();
+      output = Stat(st_ino = res['inodeNum'],
+                  st_nlink = res['nlink'],
+                  st_mode = res['mode'],
+                  st_uid = res['uid'],
+                  st_gid = res['gid'],
+                  st_dev = res['dev'],
+                  st_nlink = res['nlink'],
+                  st_size = res['size'],
+                  st_atime = res['atime'],
+                  st_mtime = res['mtime'],
+                  st_ctime = res['ctime'])
+      
+      return output
+    except Exception, e:
+      #ToDo: To write exception in console and in log.
+      return -ENOENT
+
+
+  def link(self, old_file_path, new_file_path):
+    """
+    Creating hard links.
+    - First create the new_file in new_file_parent, if it does not exists by calling __getfnameidFromName method
+    - We need not create new inode, Insert record in hierarchy table with old_file inode.
+    - Update inode table to increase the link count.
+    - 
+    """
+    try:
+      msg = "link() called at " + str(datetime.datetime.now())
+      self.__logMessage(msg)
+      new_file_parent, new_file_name = os.path.split(new_file_path);
+      new_file_parent_hid, new_file_inode = self.__getHidAndInode(new_file_parent)
+      old_file_inode = self.__getHidAndInode(old_file_path)[1]
+
+      #create a new_file in fileFolderNames table.
+      new_file_nameId = self.__GetFnameIdFromName(new_file_name)
+
+      #insert new record in hierarchy related to same inode but a new file in new_file_parent
+      query = 'INSERT INTO hierarchy (parenthid, fnameId, inodeNum) VALUES (?, ?, ?)'
+      self.conn.execute(query, (new_file_parent_hid, new_file_nameId, old_file_inode))
+
+      #update inode table to increase the link count
+      query = 'UPDATE inodes SET nlink = nlink + 1 WHERE inodeNum = ?'
+      self.conn.execute(query, (old_file_inode,))
+
+      self.conn.commit()
+      return SUCCESS
+      
+    except Exception, e:
+      #ToDo: To write exception in console and in log.
+      self.conn.rollback()
+      return FAIL
+
+  def symlink(self, target, new_link):
+    """
+    To create symbolic/soft links.
+    
+    """
+    try:
+      msg = "symlink() called at " + str(datetime.datetime.now())
+      self.__logMessage(msg)
+
+      #creating new link
+      new_link_Inode, parent_folder_inode = self.__insertNewNode(new_link, stat.S_IFLNK | 0777, len(target))
+
+      #keep track by inserting in softlinks table.
+      query = 'INSERT INTO softlinks (inodeNum, target) VALUES (?, ?)'
+      self.conn.execute(query, (new_link_Inode, sqlite3.Binary(target)))
+      
+      self.conn.commit()
+      return SUCCSS
+      
+    except Exception, e:
+      #ToDo: To write exception in console and in log.
+      self.conn.rollback()
+      return FAIL
+
+
+  def mkdir(self, path, mode):
+    """
+    Called while creating a new directory.
+    - Create a folder by inserting in inode, fileAndFolderNames and Hirarchy by calling __insertNewNode() method
+    - Increase the nlink count of parent in which this folder is created.
+    """
+    try:
+      msg = "mkdir() called at " + str(datetime.datetime.now())
+      self.__logMessage(msg)
+
+      #creating new folder.
+      new_Folder_Inode, parent_Folder_Inode = self.__insertNewNode(path, mode | stat.S_IFDIR, self.defaultFolderSize)
+
+      #Increasing the link count of parent folder.
+      query = 'UPDATE inodes SET nlink = nlink + 1 WHERE inodeNum = ?'
+      self.conn.execute(query, (parent_Folder_Inode,))
+      
+      self.conn.commit()
+      return SUCCESS
+    
+    except Exception, e:
+      #ToDo: To write exception in console and in log.
+      self.conn.rollback()
+      return FAIL
+
+
+  def mknod(self, path, mode, dev):
+    """
+    Called while creating a filesystem node (file, device special file or named pipe)
+    - Create new file by inserting in inode, fileAndFolderNames and Hierarchy by calling __insertNewNode() method
+    - Need not increase the nlink count of parent.
+    """
+    try:
+      msg = "mknod() called at " + str(datetime.datetime.now())
+      self.__logMessage(msg)
+
+      self.__insertNewNode(path, mode, self.defaultFolderSize, dev)
+      
+      self.conn.commit()
+      return SUCCESS
+    
+    execpt Exception, e:
+      #ToDo: To write exception in console and in log.
+      self.conn.rollback()
+      return FAIL
+
+
+  def read(self, path, length, offset):
+    """
+    Called when reading a particular file.
+    - Get the total buffer from self.buffer by calling helper method __get_data_buffer()
+    - read buffer from offset to length
+    """
+    try:
+      msg = "read() called at " + str(datetime.datetime.now())
+      self.__logMessage(msg)
+      
+      buf = self.__get_data_buffer(path)
+      buf.seek(offset)
+      data = buf.read(length)
+      return data
+    except Exception, e:
+      #ToDo: To write exception in console and in log.
+      return -EIO   #input output error
+
+  def readdir(self, path, offset):
+    """
+    Get the directory entries.
+    """
+    try:
+      msg = "readdir() called at " + str(datetime.datetime.now())
+      self.__logMessage(msg)
+
+      path_hid, path_inode = self.__getHidAndInode(path)     
+      
+      #Default directory pointers adding to direntry of fuse
+      yield fuse.Direntry('.', ino = inode)   
+      yield fuse.Direntry('..')
+
+      #get all the files and folders inside path by querying hierarchy table
+      query = 'SELECT h.inodeNum, f.fname FROM hierarchy h, fileFolderNames f WHERE h.parenthid = ? AND h.fnameId = f.fnameId'
+      resultList = self.conn.execute(query, (parent_hid)).fetchall()
+
+      for file in resultList:
+        yeild fuse.Direntry(str(file[1]), ino=file[0])
+
+    except Exception, e:
+      #ToDo: To write exception in console and in log.
+      return -EIO   #input output error
+
+  def readlink(self, path):
+    """
+    Called while reading a link.
+    """
+    try:
+      msg = "readlink() called at " + str(datetime.datetime.now())
+      self.__logMessage(msg)
+
+      linkInode = self.__getHidAndInode(path)[1]
+
+      #Get the link target from softlinks table.
+      query = 'SELECT target FROM softlinks WHERE inodeNum = ?'
+      result = self.conn.execute(query, (linkInode,)).fetchone()
+
+      targetpath = result[0]
+      return str(targetpath)    
+    except Exception, e:
+      #ToDo: To write exception in console and in log.
+      return -ENOENT   #No path exists
+
+  def unlink(self, path):
+    """
+    Called while removing the link.
+    """
+    try:
+      self.__removeFileOrFolder(path)
+      self.conn.commit()
+    except Exception, e:
+      self.conn.rollback()
+      #ToDo: To write exception in console and in log.
+      return FAIL
+    
+
+  def rename(self, oldPath, toPath):
+    """
+    Change the name and location of file.
+    """
+    try:
+      msg = "rename() called at " + str(datetime.datetime.now())
+      self.__logMessage(msg)
+      
+      try:
+        #if toPath directory is different that fromPath directory then check if it not empty before deleting
+        self.__removeFileOrFolder(toPath, emptyCheck=True)
+      except OSError, e:
+        if e.errno != errno.ENOENT: raise   
+
+      #creating new hard link --> equivalent to creating the new file
+      self.link(oldPath, toPath)
+
+      #deleting old file
+      self.unlink(oldPath)
+
+      self.conn.commit()
+      return SUCCESS
+    except Exception, e:
+      #ToDo: To write exception in console and in log.
+      return FAIL
+
+
+  def rmdir(self, path):
+    """
+    Called when directory is removed.
+    """
+    try:
+      msg = "rmdir() called at " + str(datetime.datetime.now())
+      self.__logMessage(msg)
+
+      #check if it is not empty before deleting
+      self.__removeFileOrFolder(toPath, emptyCheck=True)
+
+      self.conn.commit()
+      return SUCCESS
+    except Exception, e:
+      #ToDo: To write exception in console and in log.
+      return FAIL
+
+
+  def statfs(self):
+    """
+    statistics about the filesystem
+    """
+    try:
+      msg = "statfs() called at " + str(datetime.datetime.now())
+      self.__logMessage(msg)
+    except Exception, e:
+      #ToDo: To write exception in console and in log.
+      return FAIL
       
     
   #####################################################
   #Helper methods: private and called internally
   #
   #####################################################
+
+  def __get_data_buffer(self, path):
+    if path in self.dataBuffer:
+      return self.dataBuffer[path]
+
+    dataBuf = cString.StringIO()
+    fileInode = self.__getHidAndInode(path)[1]
+    query = """SELECT h.hashValue from hashValues h, fileBlocks f WHERE f.inodeNum = ?
+              AND f.hashId = h.hashId ORDER BY f.blockOrder ASC"""
+    resultList = self.conn.execute(query, (fileInode,)).fetchall()
+    for row in resultList:
+      buf.write(self.blocks[row[0]])
+    self.dataBuffer[path] = buf       #storing in dataBuffer for quick access later
+    return buf
+    
 
   def __insertNewNode(self, path, mode, size, dev=0):
     """
@@ -266,7 +549,6 @@ class dedupeEncFS(fuse.Fuse):
     return insertedInodeNum, parent_inodeNum
 
 
-
   def __GetFnameIdFromName(self, fname):
     """
     - Returns fileNameId from fileFolderNames table.
@@ -279,8 +561,41 @@ class dedupeEncFS(fuse.Fuse):
       fnameId = self.conn.execute('SELECT last_insert_rowid()').fetchone()
     return int(fnameId[0])
 
+  def __removeFileOrFolder(self, path, emptyCheck=False):
+    """
+    removes file/folder from hierarchy table and decrement the nlink in inodes table.
+    - if emptyCheck is true then we can't allow removing directory if directory is not empty.
+    - else remove from hierarchy table and decremenet nlink in inodes table.
+    - if deleted item is folder then decrement the parent folder nlink as well.
+    """
+    hid, inodeNum = self.__getHidAndInode(path)
+    if emptyCheck:
+      query = """SELECT count(h.hid) FROM hierarchy h, inodes i WHERE h.parenthid = ?
+                 AND h.inodeNum = i.inodeNum AND i.nlink > 0"""
+      results = self.conn.execute(query, (hid)).fetchone()
+      linkCount = result[0]
+      if linkCount:
+        raise OSError, (errno.ENOTEMPTY, os.strerror(errno.ENOTEMPTY), path)
     
+    del self.dataBuffer[path]
+    # Delete from hierarchy table.
+    query = 'DELETE FROM hierarchy WHERE hid = ?'
+    self.conn.execute(query, (hid,))
 
+    # Decrement the link in inodes table.
+    query = 'UPDATE inodes SET nlink = nlink - 1 WHERE inodeNum = ?'
+    self.conn.execute(query, (inodeNum,))
+
+    # Find if currently deleted item is folder from mode.
+    query = 'SELECT mode from inodes WHERE inodeNum = ?'
+    mode = self.conn.execute(query, (inodeNum,)).fetchone()[0]
+    if mode & stat.S_IFDIR:
+      parent_path = os.path.split(path)[0]
+      parent_inode = self.__getHidAndInode(parent_path)
+      query = 'UPDATE inodes SET nlink = nlink - 1 WHERE inodeNum = ?'
+      self.conn.execute(query, (parent_inode,))
+      
+    
   def __checkAccessInMetaData(self, inodeNum, flags):
     """
     Check if the access stored in metadata for this user is consistent with flags
@@ -302,9 +617,6 @@ class dedupeEncFS(fuse.Fuse):
 
     return output
                
-    
-
-    
 
   def __createMetaDatabase(self):
     """
@@ -370,20 +682,18 @@ class dedupeEncFS(fuse.Fuse):
     for fname in names:
       if fname in tempNodes:
         tempNodes = tempNodes[fname]
-        hid, inodeNum = tempNodes[self.__NODE_KEY]
+        hid, inodeNum = tempNodes[self.cache_key]
       else:
         query = 'SELET h.hid, h.inodeNum from hierarchy h, fileFolderNames f WHERE h.parenthid = ? AND h.fnameid=f.fnameid AND f.fname = ?'
         row = self.conn.execute(query, (parenthid, sqlite3.Binary(fname))).fetchone()
         if row == None:
           raise OSError     #ToDo raise custom exception showing path does not exists
         hid, inodeNum = row
-        tempNodes[fname] = {self.__NODE_KEY:(hid, inodeNum)}
+        tempNodes[fname] = {self.cache_key:(hid, inodeNum)}
         tempNodes = tempNodes[fname]
       parenthid = hid
 
     return hid, inodeNum
-        
-    
   
 
   def __logRunningTime(functionName, tstart, tend):
@@ -406,12 +716,19 @@ class dedupeEncFS(fuse.Fuse):
     """
     self.logger.debug(message)
 
-
-
-      
-    
-    
-    
+  def getLength(buf):
+      """
+      Get the length of the buffer.
+      - Get the current position in the buffer as start position
+      - Go to last position
+      - Length = last position - start position
+      - Go back to start position
+      """
+      startPosition = buf.tell()     #get the current position of cursor
+      buf.seek(0, os.SEEK_END)       #go to the last position in the buffer. 0th position respective to END of buffer
+      length = buf.tell()            #get the length by current position of cursor
+      buf.seek(startPosition, os.SEEK_SET) #Go back to starting position.
+      return length
 
 
 
