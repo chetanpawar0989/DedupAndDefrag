@@ -298,6 +298,7 @@ class dedupeEncFS(fuse.Fuse):
       #ToDo: To write exception in console and in log.
       self.conn.rollback()
       return FAIL
+    
 
   def symlink(self, target, new_link):
     """
@@ -389,6 +390,7 @@ class dedupeEncFS(fuse.Fuse):
       #ToDo: To write exception in console and in log.
       return -EIO   #input output error
 
+
   def readdir(self, path, offset):
     """
     Get the directory entries.
@@ -414,6 +416,7 @@ class dedupeEncFS(fuse.Fuse):
       #ToDo: To write exception in console and in log.
       return -EIO   #input output error
 
+
   def readlink(self, path):
     """
     Called while reading a link.
@@ -433,6 +436,7 @@ class dedupeEncFS(fuse.Fuse):
     except Exception, e:
       #ToDo: To write exception in console and in log.
       return -ENOENT   #No path exists
+
 
   def unlink(self, path):
     """
@@ -494,14 +498,103 @@ class dedupeEncFS(fuse.Fuse):
 
   def statfs(self):
     """
-    statistics about the filesystem
+    statistics about the filesystem. We will perform statvfs on metadata file, which holds the inodes
+    and can determine the number of blocks available to user etc.
     """
     try:
       msg = "statfs() called at " + str(datetime.datetime.now())
       self.__logMessage(msg)
+
+      metavfs = os.statvfs()
+      #Total number of blocks
+      totalBlocks = (metavfs.f_blocks * metavfs.f_frsize) / self.defaultBlockSize
+
+      #Total number of free blocks in file system
+      totalFree = (metavfs.f_bfree * metavfs.f_frsize) / self.defaultBlockSize
+
+      #Total number of free blocks that are available
+      totalFreeAvail = (metavfs.f_bavail * metavfs.f_frsize) / self.defaultBlockSize
+
+      output = StatVfs(f_bsize = self.defaultBlockSize,
+                       f_frsize = self.defaultBlockSize,
+                       f_blocks = totalBlocks,
+                       f_bfree = totalFree,
+                       f_bavail = totalFreeAvail,
+                       f_files = 0,
+                       f_ffree = 0,
+                       f_favail = 0,
+                       f_flag = 0,
+                       f_namemax = metavfs.f_namemax)
+      return output
+      
     except Exception, e:
       #ToDo: To write exception in console and in log.
+      return -EIO
+
+
+  def truncate(self, path, size):
+    """
+    Truncate or extend the given file so that it is precisely size bytes long.
+    - Get last block from size/blockSize after which we have to truncate
+    - delete all the blocks 
+    """
+    try:
+      msg = "truncate() called at " + str(datetime.datetime.now())
+      self.__logMessage(msg)
+
+      lastBlock = size / self.defaultBlockSize
+      if not lastBlock:   #size is less than defaultBlockSize
+        return SUCCESS
+      
+      #get inodeNume whose block entries are to be removed from fileBlocks table.
+      inodeNum = self.__getHidAndInode(path)[1]
+
+      query = 'DELETE FROM fileBlocks WHERE inodeNum = ? AND block_nr > ?'
+      self.conn.execute(query, (inodeNum, lastBlock,))
+
+      query = 'UPDATE inodes SET size = ? WHERE inodeNum = ?'
+      self.conn.execute(query, (size, inodeNum,))
+
+      self.conn.commit()
+      return SUCCESS
+    except Exception, e:
+      #ToDo: To write exception in console and in log.
+      self.conn.rollback()
       return FAIL
+
+
+  def write(self, path, data, offset):
+    """
+    write the data to path at particular offset.
+    - Get data buffer from database
+    - seek to particular offset
+    - write data at the offset
+    """
+    try:
+      msg = "write() called at " + str(datetime.datetime.now() + " on file " + str(path))
+      self.__logMessage(msg)
+      length = len(data)
+      
+      buf = __get_data_buffer(path)
+      buf.seek(offset)
+      buf.write(data)
+      
+      return length
+    except Exception, e:
+      #ToDo: To write exception in console and in log.
+      self.conn.rollback()
+      return -EIO
+
+
+  def release(self, path, flags):
+    try:
+      
+    except Exception, e:
+      #ToDo: To write exception in console and in log.
+      self.conn.rollback()
+      return -EIO
+
+    
       
     
   #####################################################
