@@ -840,51 +840,15 @@ class dedupeEncFS(fuse.Fuse):
        """
        - update inode access, modified time in nano seconds
        """
-    try:
-      inodeNum =  __getHidAndInode(path)[1]
-      atime_ns = a_time.tv_sec + (a_time.tv_nsec / 1000000.0) #convert access time in nano seconds
-      mtime_ns = m_time.tv_sec + (m_time.tv_nsec / 1000000.0) #convert modified time in nano seconds
-      self.conn.execute('UPDATE inodes SET atime = ?, mtime = ? WHERE inode = ?', (atime_ns, mtime_ns, inode))           
-      return 0
-    except Exception e:
-       #ToDo: To write exception in console and in log.
-        sys.exit(1)      
-
-  def unlink(self, path, inner_call)
-       """
-       - Unlink and update inode and hierarchy details
-       """   
-    try:
-      self.__remove(path)
-      self.conn.commit()
-    except Exception, e:
-      self.__rollback_changes(nested)
-      if inner_call: raise
-      #ToDo: To write exception in console and in log.
-      sys.exit(1)
-
-  def __remove(self, path, check)    
-       """
-       - update Hierarchy and Inode tables
-       """  
-     hid, inodeNum = self.__getHidAndInode(path)
-     query = ' SELECT COUNT(h.hid) FROM hierarchy, indoes i WHERE \
-               h.parenthid = ? AND  i.inodeNum AND i.nlink > 0'
-      if self.conn.execute(query, values).fetchone()[0] > 0 #if we are deleting a directory but it is not empty
-         \\ ToDo Raise an error
-      self.conn.execute('DELETE FROM hierarchy where hid= ?',(hid,))
-      self.conn.execute(UPDATE indoes SET nlink = nlink - 1 WHERE inodeNum = ?', (inodeNum,))   
-
-      # Reduce links for parent by 1
-      mode = self.conn.execute('select mode FROM inodes WHERE inodeNum = ?',inodeNum)
-      if mode:
-        parentHid, parentINodeNum = self.__getHidAndInode(os.path.split(path)[0])
-        self.conn.execute('UPDATE inodes SET nlink = nlink -1 WHERE inodeNum = ?', (parentINodeNum,))
-
-
-
-
-
+       try:
+         inodeNum =  __getHidAndInode(path)[1]
+         atime_ns = a_time.tv_sec + (a_time.tv_nsec / 1000000.0) #convert access time in nano seconds
+         mtime_ns = m_time.tv_sec + (m_time.tv_nsec / 1000000.0) #convert modified time in nano seconds
+         self.conn.execute('UPDATE inodes SET atime = ?, mtime = ? WHERE inode = ?', (atime_ns, mtime_ns, inode))           
+         return 0
+       except Exception e:
+         #ToDo: To write exception in console and in log.
+         sys.exit(1)      
 
 if __name__ == '__main__':
    main()
