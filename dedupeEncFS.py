@@ -10,32 +10,35 @@ except ImportError:
   
 import logging
 import os
+import stat
 import time
 import datetime
+import sqlite3
 import cStringIO
 from errno import *
 import hashlib
 
-SUCCSS, FAIL = 0, -1
+SUCCESS, FAIL = 0, -1
 
 fuse.fuse_python_api = (0, 2)
 
 def main():
    """
-   Starting point which initilizes the dedupe class object which in turn calls FUSE
+   Starting point which initilize the dedupe class object which in turn calls FUSE
    to create file system.
    """
    server = dedupeEncFS()
 
    arguments = server.parse(['-o', 'use_ino,default_permissions,fsname=dedupfs'] + sys.argv[1:])
 
-   """
-   if server.fuse_args.mount_expected() and not arguments.mountpoint:
-     server.parse('-h')
-   el
-   """
+   ###
+   #if server.fuse_args.mount_expected() and not arguments.mountpoint:
+   #  server.parse('-h')
+   #
+   ###
+
    if arguments.mountpoint or not server.fuse_args.mount_expected():     
-     dfs.main()		#calling fuse.main() indirectly
+     server.main()		#calling fuse.main() indirectly
      
 
 class dedupeEncFS(fuse.Fuse):
@@ -116,7 +119,7 @@ class dedupeEncFS(fuse.Fuse):
       tend = datetime.datetime.now()      
       self.__logRunningTime('fsinit()', tstart, tend)
       
-    except Exception, e
+    except Exception, e:
       sys.exit(1)
 
       
@@ -129,7 +132,7 @@ class dedupeEncFS(fuse.Fuse):
       self.__logMessage(msg)
                        
       hid, inodeNum = self.__getHidAndInode(path)
-      if mode != os.F_OK and not self.__checkAccessInMetaData(path):
+      if mode != os.F_OK and not self.__checkAccessInMetaData(inodeNum, mode):
         return -EACCES
 
       return SUCCESS
@@ -148,7 +151,7 @@ class dedupeEncFS(fuse.Fuse):
       hid, inodeNum = self.__getHidAndInode(path)
 
       query = 'UPDATE inodes SET mode = ? WHERE inode = ?'
-      conn.execute(query, (mode, inodeNum, uid))
+      self.conn.execute(query, (mode, inodeNum,))
       return SUCCESS
       
     except Exception, e:
@@ -166,7 +169,7 @@ class dedupeEncFS(fuse.Fuse):
       hid, inodeNum = self.__getHidAndInode(path)
 
       query = 'UPDATE inodes SET uid = ?, gid = ? WHERE inode = ?'
-      conn.execute(query, (uid, gid, inodeNum))
+      self.conn.execute(query, (uid, gid, inodeNum))
       return SUCCESS
       
     except Exception, e:
@@ -182,7 +185,7 @@ class dedupeEncFS(fuse.Fuse):
       msg = "open() called at " + str(datetime.datetime.now())
       self.__logMessage(msg)
 
-      if inode == None
+      if inode == None:
         inodeNum = self.__getHidAndInode(path)[1]
       else:
         inodeNum = inode
@@ -210,11 +213,11 @@ class dedupeEncFS(fuse.Fuse):
       
       res = self.open(path, flags, inodeNum)
 
-      if res == SUCCSS:
+      if res == SUCCESS:
         self.conn.commit()
         return SUCCESS      
       else:
-        msg = "Error in create() method. Rolling back the changes.")
+        msg = "Error in create() method. Rolling back the changes."
         self.conn.rollback()
         return FAIL
       
@@ -252,7 +255,7 @@ class dedupeEncFS(fuse.Fuse):
 
 
   
-  def getattr(sef, path):
+  def getattr(self, path):
     """
     Called when stat, fstat, lstat done
     """
@@ -261,9 +264,9 @@ class dedupeEncFS(fuse.Fuse):
       self.__logMessage(msg)
 
       inodeNum = self.__getHidAndInode(path)[1]
-      query = 'SELECT inodeNum, nlink, mode, uid, gid, dev, size, atime, mtime, ctime FROM inodes WHERE inode = ?'
-      res = self.conn.execute(query, (inode,)).fetchone();
-      output = Stat(st_ino = res['inodeNum'],
+      query = 'SELECT inodeNum, nlink, mode, uid, gid, dev, size, atime, mtime, ctime FROM inodes WHERE inodeNum = ?'
+      res = self.conn.execute(query, (inodeNum,)).fetchone();
+      output = fuse.Stat(st_ino = res['inodeNum'],
                   st_nlink = res['nlink'],
                   st_mode = res['mode'],
                   st_uid = res['uid'],
@@ -332,7 +335,7 @@ class dedupeEncFS(fuse.Fuse):
       self.conn.execute(query, (new_link_Inode, sqlite3.Binary(target)))
       
       self.conn.commit()
-      return SUCCSS
+      return SUCCESS
       
     except Exception, e:
       #ToDo: To write exception in console and in log.
@@ -381,8 +384,8 @@ class dedupeEncFS(fuse.Fuse):
       self.conn.commit()
       return SUCCESS
     
-    execpt Exception, e:
-      #ToDo: To write exception in console and in log.
+    except Exception, e:
+      #todo: To write exception in console and in log.
       self.conn.rollback()
       return FAIL
 
@@ -417,19 +420,19 @@ class dedupeEncFS(fuse.Fuse):
       path_hid, path_inode = self.__getHidAndInode(path)     
       
       #Default directory pointers adding to direntry of fuse
-      yield fuse.Direntry('.', ino = inode)   
+      yield fuse.Direntry('.', ino = path_inode)
       yield fuse.Direntry('..')
 
       #get all the files and folders inside path by querying hierarchy table
       query = 'SELECT h.inodeNum, f.fname FROM hierarchy h, fileFolderNames f WHERE h.parenthid = ? AND h.fnameId = f.fnameId'
-      resultList = self.conn.execute(query, (parent_hid)).fetchall()
+      resultList = self.conn.execute(query, (path_hid)).fetchall()
 
       for file in resultList:
-        yeild fuse.Direntry(str(file[1]), ino=file[0])
+        yield fuse.Direntry(str(file[1]), ino=file[0])
 
     except Exception, e:
       #ToDo: To write exception in console and in log.
-      return -EIO   #input output error
+      pass
 
 
   def readlink(self, path):
@@ -478,7 +481,7 @@ class dedupeEncFS(fuse.Fuse):
         #if toPath directory is different that fromPath directory then check if it not empty before deleting
         self.__removeFileOrFolder(toPath, emptyCheck=True)
       except OSError, e:
-        if e.errno != errno.ENOENT: raise   
+        if e.errno != ENOENT: raise
 
       #creating new hard link --> equivalent to creating the new file
       self.link(oldPath, toPath)
@@ -502,7 +505,7 @@ class dedupeEncFS(fuse.Fuse):
       self.__logMessage(msg)
 
       #check if it is not empty before deleting
-      self.__removeFileOrFolder(toPath, emptyCheck=True)
+      self.__removeFileOrFolder(path, emptyCheck=True)
 
       self.conn.commit()
       return SUCCESS
@@ -530,7 +533,7 @@ class dedupeEncFS(fuse.Fuse):
       #Total number of free blocks that are available
       totalFreeAvail = (metavfs.f_bavail * metavfs.f_frsize) / self.defaultBlockSize
 
-      output = StatVfs(f_bsize = self.defaultBlockSize,
+      output = fuse.StatVfs(f_bsize = self.defaultBlockSize,
                        f_frsize = self.defaultBlockSize,
                        f_blocks = totalBlocks,
                        f_bfree = totalFree,
@@ -583,7 +586,7 @@ class dedupeEncFS(fuse.Fuse):
       self.__logMessage(msg)
       length = len(data)
       
-      buf = __get_data_buffer(path)
+      buf = self.__get_data_buffer(path)
       buf.seek(offset)
       buf.write(data)
       self.dirtyPaths[path] = True
@@ -651,7 +654,7 @@ class dedupeEncFS(fuse.Fuse):
 
     self.blocks[hashKey] = data
 
-    newBuf = cString.StringIO()
+    newBuf = cStringIO.StringIO()
     newBuf.write(data)
     self.dataBuffer[path] = newBuf
     self.dirtyPaths[path] = True    
@@ -683,7 +686,7 @@ class dedupeEncFS(fuse.Fuse):
     if path in self.dataBuffer:
       return self.dataBuffer[path]
 
-    dataBuf = cString.StringIO()
+    dataBuf = cStringIO.StringIO()
     fileInode = self.__getHidAndInode(path)[1]
     
     query = """SELECT h.hashValue from hashValues h, fileBlocks f WHERE f.inodeNum = ?
@@ -754,10 +757,10 @@ class dedupeEncFS(fuse.Fuse):
     if emptyCheck:
       query = """SELECT count(h.hid) FROM hierarchy h, inodes i WHERE h.parenthid = ?
                  AND h.inodeNum = i.inodeNum AND i.nlink > 0"""
-      results = self.conn.execute(query, (hid)).fetchone()
+      result = self.conn.execute(query, (hid)).fetchone()
       linkCount = result[0]
       if linkCount:
-        raise OSError, (errno.ENOTEMPTY, os.strerror(errno.ENOTEMPTY), path)
+        raise OSError, (ENOTEMPTY, os.strerror(ENOTEMPTY), path)
 
     if path in self.dataBuffer:
       del self.dataBuffer[path]
@@ -794,7 +797,7 @@ class dedupeEncFS(fuse.Fuse):
     result = self.conn.execute(query, (inodeNum)).fetchone();
 
     o = context['uid'] == result['uid']    #check if owner
-    g = context['gid'] == result['gid'] and not u   #check if same group but not owner
+    g = context['gid'] == result['gid'] and not o   #check if same group but not owner
     w = not (o or g)    #implies neither owner nor beloging to same group
     m = result['mode']
 
@@ -885,27 +888,27 @@ class dedupeEncFS(fuse.Fuse):
     return hid, inodeNum
   
 
-  def __logRunningTime(functionName, tstart, tend):
+  def __logRunningTime(self, functionName, tstart, tend):
     """
     To log the running time of function.
     """
     msg = ''
-    time_diff = tend - tstart;
-    seconds = time_diff.total_seconds();
+    time_diff = tend - tstart
+    seconds = time_diff.total_seconds()
 
     msg = functionName + " called:" + str(tstart) + " to " \
-            + str(tend) " --> " + str(seconds) + " seconds."      
+            + str(tend) + " --> " + str(seconds) + " seconds."
       
     self.__logMessage(msg)
 
 
-  def __logMessage(message):
+  def __logMessage(self, message):
     """
     To log debug message.
     """
     self.logger.debug(message)
 
-  def __getSizeOfBuffer(buf):
+  def __getSizeOfBuffer(self, buf):
       """
       Get the length of the buffer.
       - Get the current position in the buffer as start position
