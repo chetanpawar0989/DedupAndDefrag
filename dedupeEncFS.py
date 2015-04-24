@@ -29,7 +29,7 @@ def main():
    """
    server = dedupeEncFS()
 
-   arguments = server.parse(['-o', 'use_ino,default_permissions,fsname=dedupfs'] + sys.argv[1:])
+   arguments = server.parse(['-o', 'use_ino,default_permissions,fsname=dedupefs'] + sys.argv[1:])
 
    ###
    #if server.fuse_args.mount_expected() and not arguments.mountpoint:
@@ -37,8 +37,12 @@ def main():
    #
    ###
 
-   if arguments.mountpoint or not server.fuse_args.mount_expected():     
-     server.main()		#calling fuse.main() indirectly
+   #print "Came inside"
+
+   if arguments.mountpoint or not server.fuse_args.mount_expected():
+    msg = "Filesystem initialized. mountpt = " + arguments.mountpoint
+    print msg
+    server.main()		#calling fuse.main() indirectly
      
 
 class dedupeEncFS(fuse.Fuse):
@@ -90,6 +94,7 @@ class dedupeEncFS(fuse.Fuse):
     - Creating file to store list of files that are not deduplicated.
     """
     try:
+      sys.stdout.write("Inside fsinit()")
       tstart = datetime.datetime.now()
       self.encryptionMethod = ''    #Todo
       self.blockDBPath = os.path.expanduser(self.blockDatabase)
@@ -267,7 +272,6 @@ class dedupeEncFS(fuse.Fuse):
       query = 'SELECT inodeNum, nlink, mode, uid, gid, dev, size, atime, mtime, ctime FROM inodes WHERE inodeNum = ?'
       res = self.conn.execute(query, (inodeNum,)).fetchone();
       output = fuse.Stat(st_ino = res['inodeNum'],
-                  st_nlink = res['nlink'],
                   st_mode = res['mode'],
                   st_uid = res['uid'],
                   st_gid = res['gid'],
@@ -648,8 +652,11 @@ class dedupeEncFS(fuse.Fuse):
     # Store new block as a single block.
     buf.seek(0, os.SEEK_SET)
     data = buf.read(size)
-    rpk = RabinKarp()
-    hashKey = rpk.getHashKey(data)
+    #rpk = RabinKarp()
+    #hashKey = rpk.getHashKey(data)
+    temp = self.hashFunction()
+    temp.update(data)
+    hashKey = temp.hexdigest()
     hashKeyForDB = sqlite3.Binary(hashKey)
 
     self.blocks[hashKey] = data
