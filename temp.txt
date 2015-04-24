@@ -1,0 +1,79 @@
+main()
+-------------------
+class dedupeEncFS(fuse.FUSE):
+ 
+ defaultBlockSize = 1024 * 8 = 8Kb
+ dataBuffer = {}		//{path:entire file in buffer}
+ dirtyPaths = {}		//{path:True/False whether the buffer is dirty}
+ blockDatabase = '~/.datastore.db'
+ blockDBPath = os.path.expanduser(self.blockDatabase) = '/home/chetanpawar0989/.datastore.db'
+ metaDatabase = '~/.metadata.sqlite3'
+ metaDBPath = os.path.expanduser(self.metaDatabase) = '/home/chetanpawar0989//metadata.sqlite3'
+ logfile = '~/FS.log'
+ logFilePath = os.path.expanduser(self.logfile) = '/home/chetanpawar0989/FS.log'
+ link_mode = stat.S_IFLNK | 0777
+ nodes = {}		//temp cache of {fileName:{cache_key:(hid, inode), childFileName:{cache_key:(hid,inode), childFileName...}}}
+ cache_key = 0
+ defaultFolderSize = 1024 * 4 = 4Kb
+ defaultFileSize = 0 = 0Kb
+ hashFunction = getattr(hashlib, "md5")
+ logger = logging.getLogger('dedupeEncFS')
+ self.encryptionMethod = ''    #Todo
+
+ __init__()
+ 
+
+API methods:
+- fsinit(self)
+- access(self, path, mode) 
+- chmod(self, path, mode)
+- chown(self, path, uid, gid)
+- open(self, path, flags, inode=None)
+- create(self, path, flags, mode)
+- fsdestroy(self)
+- getattr(sef, path)
+- link(self, old_file_path, new_file_path)
+- symlink(self, target, new_link)
+- mkdir(self, path, mode)
+- mknod(self, path, mode, dev)
+- read(self, path, length, offset)
+- readdir(self, path, offset)
+- readlink(self, path)
+- unlink(self, path)
+- rename(self, oldPath, toPath)
+- rmdir(self, path)
+- statfs(self)
+- truncate(self, path, size)
+
+
+
+Helper methods:
+- __logMessage(msg)
+- __logRunningTime(methodname, tstart, tend)
+- __createBlockDatabase()
+- __createMetaDatabase()
+- __insertMetaDataTables()
+- __getHidAndInode(path)
+- __checkAccessInMetaData(path)
+- __insertNewNode(self, path, mode, size, dev=0, isSoftLink=False)
+- __GetFnameIdFromName(self, fname)
+- __get_data_buffer(path)
+- __removeFileOrFolder(path)
+- __store_blocks()
+- __getSizeOfBuffer(buf)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,338 @@
+https://github.com/xolox/dedupfs
+
+main()		DONE
+- create dedupefs() object. call it's constructor __init__(). 
+- use fuse_opts = dfs.parse() method to parse all command line arguments  sys.argv[1:]. Now fuse.cmdline[0] and fuse.fuse_args stores all the parsed options.
+- if mountpoint is populated, call the dfs.main() => fuse.main() method.
+
+
+----------------------------------------------------------------------------------DONE
+__init__(self, *args, **kw):	// to call fuse.init() and create database etc.		
+calling fuse.init(self, *args, **kw)
+set block_size = 1024 * 128
+self.buffers = {}		//stores the actual data 
+self.datastore_file = '~/.dedupfs-datastore.db'
+self.metastore_file = '~/.dedupfs-metastore.sqlite3'
+self.logger = logging.getLogger('dedupfs')		//initilize logger. It returns reference to logger instance with root(default)/name specified.
+self.logger.setLevel(logging.INFO)		//setting lowest lowest level of messages to log to INFO. only INFO, WARNING, ERROR, and CRITICAL msg will be logged.
+self.logger.addHandler(logging.StreamHandler(sys.stderr))		//adding handler
+adding all the command line options using optparse. // https://docs.python.org/2/library/optparse.html
+self.parser.add_option()
+
+----------------------------------------------------------------------------------DONE
+
+def fsinit(self, silent=False):		
+- Take options = parsed cmd line fuse.cmdline[0]
+- initilize all the self variables using options.var_names if added in parser.add_option()
+- call def __init_logging(self, options):
+- __log_call()  call os.fsinit() method
+- __setup_database_connections() to create metadatabase and create connection to metadatabase.
+- call __init_metastore() to create metadata tables
+- get hash_function_implemention from hashlib library self.hash_function_impl = getattr(hashlib, self.hash_function)
+
+------------------------------------------------------------------------------------DONE
+def access(self, path, flags): 		
+- calling fuse API function through __log_call() method: self.__log_call('access', 'access(%r, %o)', path, flags)
+- get inode of the path folder/file by calling path2keys() method
+- check in metadata if the current user has access with given flags by calling __access() method which checks access level inode table.
+- return true/false
+
+------------------------------------------------------------------------------------DONE
+def chmod(self, path, mode):			
+- get inode of the path folder/file by calling path2keys() method
+- Update mode column inode table with the mode that is coming in function.
+
+------------------------------------------------------------------------------------DONE
+def chown(self, path, uid, gid):		
+- calling fuse API chown through logger
+- get inode of the path folder/file by calling path2keys() method
+- Update uid and gid column inode table with the mode that is coming in function.
+
+------------------------------------------------------------------------------------DONE
+def create(self, path, flags, mode):		
+- call FUSE API create method first
+- try to open a file by calling open(path, flags, nested=True) method
+- if exception means file does not exist then 
+- call self.__insert() to insert new file in metadata which returns inserted file inode and parent inode.
+- call open method again to try opening a file.
+- commit changes
+
+-------------------------------------------------------------------------------------DONE
+def open(self, path, flags, nested=None, inode=None):		
+- Call fuse api open method
+- get inode from tree method or from passed in function
+- calculate access_flags from flags
+- check access by calling __access(inode, access_flags)
+
+----------------------------------------------------------------------------------DONE
+def fsdestroy(self, silent=False):			
+- call sync on self.blocks (which stores datastore gdbm object)
+- call connection.commit
+- call connection.close
+- call close on self.blocks
+
+----------------------------------------------------------------------------------DONE
+def getattr(self, path):				
+- call fuse_api getattr method
+- get inode of path (file/folder) by calling path2keys function
+- query inode table and store the result in fuse.Stat class object
+- return result (fuse.stat object)
+
+----------------------------------------------------------------------------------DONE
+nested = false by default when called through OS and true if called through inside the code itself.(called in rename method)
+def link(self, target_path, link_path, nested=False):	//to create hard link		
+- call fuse_api link method.
+- target_inode = self2path(target_path) // old file path
+- get parentpath and childpath using os.path.split() on new link file path
+- get parent_id and parent_inode = self2path(parent_path) on new link file path
+- get string_id by calling __intern() method for childname (new file link name)
+- insert in tree table with parent_id (of new file folder), string_id(new link) and target_inode (same old file inode value since its a link)
+- update inodes table to incrase nlink++ for target_inode (old + new file inode).
+- increase nlink of new link file parent nlink++
+- commit
+
+----------------------------------------------------------------------------------DONE
+def mkdir(self, path, mode): 			
+- call fuse_api mkdir method
+- call __insert(for dir) and get inode and parent_inode
+- update nlink count for parent_inode in inodes table.	//increase nlink of parent folder
+- commit
+
+----------------------------------------------------------------------------------DONE
+def mknod(self, path, mode, rdev):	//creates special file (block file or character file), named pipe
+- call fuse_api mknod
+- call __insert to insert in metadata. (does not increase nlink of parent folder)
+- commit
+
+----------------------------------------------------------------------------------DONE
+def read(self, path, length, offset):
+- self.__log_call('read', 'read(%r, %i, %i)', path, length, offset)
+- call __get_file_buffer() to get a combined file in buf object
+- call buf.seek(offset)
+- data = buf.read(length)
+- return data
+
+----------------------------------------------------------------------------------DONE
+def readdir(self, path, offset): 
+- call fuse api readdir() function
+- node_id, inode = path2keys(path)
+- yield fuse.Direntry(".", ino=inode)	//adding pointer to self
+- yield fuse.Direntry("..")	//adding link to parent
+- query tree table for all the children having parent_id = node_id and get their name and inode
+- for each name yield fuse.Direntry(name, inode)
+----------------------------------------------------------------------------------DONE
+def readlink(self, path):	//reading soft link
+- call fuse API method
+- get inode from path2keys() method of path
+- search and return target from links table for that inode
+
+----------------------------------------------------------------------------------
+def release(self, path, flags): //to release/close a file
+- call fuse API release method
+- check path in self.buffers. if it is there then
+- take buf = self.buffers[path]
+- get inode of path from path2keys() method
+- call __write_blocks(inode, buf, aparent_size)		//updates metadata and performs deduplication
+- commit
+- buf.close()
+- remove self.buffers[path]
+- return 0, success
+-----------------------------------------------------------------------------------DONE
+def rename(self, old_path, new_path):
+- call fuse api rename function
+- call __remove(new_path) 	//to delete all the entries of target node
+- call link method for new path with nested = true
+- call unlink method for old path
+- commit
+
+------------------------------------------------------------------------------------
+def rmdir(self, path): 
+- call fuse api rmdir
+- call __remove(path)	//to delete all the entries of path
+- commit
+
+------------------------------------------------------------------------------------
+def statfs(self):
+- call fuse api statfs
+- call os.statvfs on metastore file
+- create StatVFS class object with characteristics to display
+
+------------------------------------------------------------------------------------DONE
+def symlink(self, target_path, link_path):
+- call fuse api symlink
+- create a file using __insert function in metadata
+- insert into links table (inode, target_path)
+- commit
+
+------------------------------------------------------------------------------------
+def truncate(self, path, size):
+- call fuse api truncate
+- get inode of path using path2keys() method
+- get last block = size / block_size
+- delete all the blocks greater than last block
+- update size in inode table 
+- commit
+------------------------------------------------------------------------------------DONE
+def unlink(self, path, nested=False):
+- call fuse api unlink
+- call __remove(path) with check_nested = false by default, to allow deletion even if subfolders exists
+- commit
+
+------------------------------------------------------------------------------------DONE
+def utime(self, path, times):
+- call api utime
+- get inode of path from path2keys
+- atime, mtime = times
+- update inode with atime and mtime
+- commit
+
+------------------------------------------------------------------------------------DONE
+def utimens(self, path, ts_acc, ts_mod):  //detailed level time update
+- call api utimens
+- get inode of path from path2keys
+- atime = ts_acc.tv_sec + (ts_acc.tv_nsec / 1000000.0)
+- mtime = ts_mod.tv_sec + (ts_mod.tv_nsec / 1000000.0)
+- update inode with atime and mtime
+- commit
+
+------------------------------------------------------------------------------------
+def write(self, path, data, offset):
+- get len 
+- call fuse api write call with path, offset, length
+- get buf object by calling __get_file_buffer() method
+- go to offset by calling seek
+- call buf.write(data)
+- return length = len(data)
+
+
+
+
+-----------------------------------------------------------------------------------
+------------------------------------------------------------------------------------
+helper functions: 
+
+def __check_data_file(self, pathname, silent):
+- Get expanded pathname using os.path.expanduser(path)
+- check access, if not then error
+- return expanded path
+
+--------------------------------------------
+def __init_logging(self, options):
+- add logging handler with the log file if specified
+
+--------------------------------------------
+def __setup_database_connections(silent=false):
+- if metafile path does not exist (creating first time) self.blocks = open datastore file by calling function __open_datastore()
+- self.blocks stores datastorefile gdbm object
+- self.conn = sqlite.connection to metadatabase.
+- self.conn.rowfactory = sqlite.row
+- self.conn.text_factory = str
+- set locking mode as exclusive using self.conn.execute('PRAGMA locking_mode = EXCLUSIVE')
+
+--------------------------------------------
+def __init_metastore(self):
+uid, gid = os.getuid(), os.getgid()		//get current user id and groupid
+
+Tree(id, parent_id, name, inode)	//to store hierarchy
+strings(id, value BLOB)	//to store each file name and folder name
+inodes(inode, nlinks, mode, gid, uid, rdev, atime, mtime, ctime)	//inode data stat_bf
+links(inode, target BLOB)	//to store symbolic links
+hashes(id, hash BLOB)		//to store hash values
+"index"(inode, hash_id, block_nr)	// to store indices
+options(name, text)	//to store command line options
+
+tree.inode = inodes.inode
+tree.name = strings.id
+inodes.inode = index.inode
+hashes.id = index.hash_id
+
+insert strings(1, '')	//for root folder
+insert tree(1, null, 1, 1)	//for root in the tree
+insert inode(AUTO, 2, stat.S_IFDIR | 0755, uid, gid, 0, size=1024*4 (default size of empty folder), time, time, time)
+
+--------------------------------------------
+def __open_datastore(self, use_gdbm):
+- open gdbm database
+
+--------------------------------------------
+def __path2keys(self, path):
+- node_id, inode_id = 1, 1 	//referring to root first
+- start from root and keep on traversing tree table join with string table till you find the last file/folder.
+- return tree.id and tree.inode
+
+--------------------------------------------
+def __access(self, inode, flags):
+- get uid, gid and mode from inode table for particular inode.
+- check if given flag access is true with that in database.
+---------------------------------------------
+def __insert(self, path, mode, size, rdev=0):
+- spilt path into parent and name using os.path.split()
+- get parent_id and parent_inode from tree table by calling path2keys() method on parent
+- set nlinks = 2 or folder and 1 for file depending on mode passed.
+- get uid and gid by calling __getctx() method
+- insert data in inodes table to create inode for child file/folder (to be created)
+- insert child data in string table using __intern method
+- insert data in tree table with the inode_id got from above inode and string table insert.
+- return child inode and parent inode.
+
+---------------------------------------------
+def __getctx(self):
+- call fuse.FuseGetContext() to get c[uid] and c[gid]
+
+-------------------------------------------
+def __intern(self, string):
+- check if string is present in strings table. if yes return rowid.
+- if not then insert in string table and return the rowid
+-------------------------------------------
+def __get_file_buffer(self, path):
+- if path is in buffers then return
+- else create new Buffer() class object = buf
+- get inode of path from path2keys() method
+- get all hash values from hashes table join with indexes table for above inode.
+- for each hash value, check self.blocks[hashvalue] and append it buf object
+- add self.buffers[path] = buf object
+- return buf object (combined content)
+
+----------------------------------------------
+def __write_blocks(self, inode, buf, apparent_size):
+- delete existing entry from index table for particular inode
+- divide a file into number of blocks of block_size and for each block_number iterate
+- seek to block_size * block_number position
+- read block size
+- calculate hash
+- check if hash is present in hashes table for particular hash
+- if yes then insert in index table with old hash value
+- else insert in hash table and in index table with new hash value.
+- Update size, access time, mtime in inode
+-------------------------------------------------------
+def __remove(self, path, check_empty=False):
+- get node_id and inode from path2keys() method
+- check if check_empty is true and any descendents are there with nlink > 0 in tree table for parent_id = node_id. if yes then raise error since you can not remove directory having files.
+- else delete entry from tree table.
+- reduce number of links - 1 in inode table for inode
+- if current inode is having dir mode then reduce nlink of parent as well by updating in inode table.
+
+
+class Buffer:	//to store, modify or read actual data
+
+__init__()
+- self.buf = cStringIO.StringIO()
+- dirty = false
+
+def __getattr__(self, attr, default=None):
+- call getattr
+
+def __len__(self):	//Get the total size of the buffer in bytes.
+- position = self.buf.tell()	//get the last read position
+- self.buf.seek(0, os.SEEK_END)		//read upto end
+- length = self.buf.tell()	//get total length 
+- self.buf.seek(position, os.SEEK_SET)		//setting pointer at beginning
+- return length
+
+def truncate(self, *args):
+- if current position is less than actual length then set dirty flag = true
+- call cStringIO.StringIO.truncate(args);
+
+def write(self, *args):
+- self.dirty = True
+- return self.buf.write(*args)	//calling cStringIO.StringIO.write() method
