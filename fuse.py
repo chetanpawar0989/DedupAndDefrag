@@ -756,6 +756,7 @@ class Fuse(object):
         try:
             main(**d)
         except FuseError:
+            print 'Error in fuse main()'
             if args or self.fuse_args.mount_expected():
                 raise
 
@@ -772,7 +773,7 @@ class Fuse(object):
         if it's an instance of FuseFileInfo.
         """
         fun = getattr(self, fname)
-
+        #print "Inside lowwrap: fun = " + str(fun)
         if fname in ('open', 'create'):
             def wrap(*a, **kw):
                 res = fun(*a, **kw)
@@ -788,6 +789,7 @@ class Fuse(object):
         else:
             wrap = fun
 
+        #print "Inside lowwrap: wrap = " + str(wrap)
         return wrap
 
     def GetContext(self):
