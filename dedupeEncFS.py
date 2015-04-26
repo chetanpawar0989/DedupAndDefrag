@@ -17,7 +17,7 @@ import sqlite3
 import cStringIO
 from errno import *
 import hashlib
-import RabinKarp
+from RabinKarp import RabinKarp
 
 SUCCESS, FAIL = 0, -1
 
@@ -751,9 +751,13 @@ class dedupeEncFS(fuse.Fuse):
       self.__write_log("release","called on path:" + path)
       if path in self.dataBuffer:
         buf = self.dataBuffer[path]
-      # If buffer is not modified then return success.
+      else:
+        return SUCCESS
+
+      # If buffer is not modified then also return success.
       if path not in self.dirtyPaths or not self.dirtyPaths[path]:
         #buf.close()
+        self.__write_log("release","returned since not in dirtypath" + path)
         return SUCCESS
 
       #else we need to update the new buffer in metadata as a new file.
@@ -795,21 +799,15 @@ class dedupeEncFS(fuse.Fuse):
     """
     # Delete old entries in fileBlocks table for corresponding inodeNum
     self.__write_log("store_blocks","called")
-    query = 'DELETE FROM fileBlocks WHERE inodeNum = ?'
-    self.conn.execute(query, (inodeNum,))
+    self.__delete_old_fileBlockEntries(inodeNum)
 
     # Store new block as a single block.
     buf.seek(0, os.SEEK_SET)
     data = buf.read(size)
     rpk = RabinKarp()
+
     hashKey = rpk.ComputeHash(data)
-
-    #temp = self.hashFunction()
-    #temp.update(data)
-    #hashKey = temp.hexdigest()
-    hashKeyForDB = sqlite3.Binary(hashKey)
-
-    self.blocks[hashKey] = data
+    self.__write_log("store_blocks","after rpk.ComputeHash()")
 
     newBuf = cStringIO.StringIO()
     newBuf.write(data)
@@ -817,28 +815,67 @@ class dedupeEncFS(fuse.Fuse):
     self.dirtyPaths[path] = False
 
     # Insert new hashKey in hashValues table with refCount = 1 (default)
-    query = 'INSERT INTO hashValues(hashId, hashValue, refCount, length) VALUES (NULL, ?, 1,?)'
-    self.conn.execute(query, (hashKeyForDB, len(data),))
+
+    if hashKey in self.blocks:
+        hashId = self.conn.execute('SELECT hashId FROM hashValues WHERE hashValue = ?', (hashKey,)).fetchone()
+        if not hashId:
+            query = 'INSERT INTO hashValues(hashId, hashValue, refCount, length) VALUES (NULL, ?, 1,?)'
+            self.conn.execute(query, (hashKey, len(data),))
+            hashId = self.conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+        else:
+            query = 'UPDATE hashValues SET refCount = refCount + 1 WHERE hashValue = ?'
+            self.conn.execute(query, (hashKey,))
+            hashId = hashId[0]
+    else:
+        query = 'INSERT INTO hashValues(hashId, hashValue, refCount, length) VALUES (NULL, ?, 1,?)'
+        self.conn.execute(query, (hashKey, len(data),))
+        hashId = self.conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+
+    self.blocks[hashKey] = data
 
     # Insert records in fileBlocks for referencing inode with corresponding hashKey just inserted.
-    query = 'INSERT INTO fileBlocks(inodeNum, hashId, blockOrder) VALUES (?, last_insert_rowid(), 0)'
-    self.conn.execute(query, (inodeNum,))
+    query = 'INSERT INTO fileBlocks(inodeNum, hashId, blockOrder) VALUES (?, ?, 0)'
+    self.conn.execute(query, (inodeNum, hashId,))
+    self.__write_log("New file block entry inserted","hashId:" + str(hashId))
 
     #update size and modified time in inodes table.
     t = time.time()
     query = 'UPDATE inodes SET size = ?, mtime = ? WHERE inodeNum = ?'
     self.conn.execute(query, (size, t, inodeNum,))
+    self.__write_log("inode size updated","size:" + str(size))
 
     #if file is modified then insert record in logs table for lazy deduplication to pickup.
-    query = 'SELECT isNewlyCreated FROM logs WHERE inodeNum = ?'
+    query = 'SELECT path FROM logs WHERE inodeNum = ?'
     rowCount = self.conn.execute(query, (inodeNum,)).fetchone()
-    # insert in logs only if its not already there. Create() function might have inserted it already.
+    # insert in logs only if its not already there..
     if not rowCount:
-      query = 'INSERT INTO logs(inodeNum, path, isNewlyCreated) VALUES (?, ?, 0)'
+      query = 'INSERT INTO logs(inodeNum, path) VALUES (?, ?)'
       self.conn.execute(query, (inodeNum,sqlite3.Binary(path),))
+      self.__write_log("path added to log","path:" + str(path))
     self.__write_log("store_blocks","ended")
 
 
+  def __delete_old_fileBlockEntries(self, inodeNum):
+        try:
+            self.__write_log("__delete_old_fileBlockEntries","called")
+            query = 'SELECT hashId FROM fileBlocks WHERE inodeNum = ?'
+            results = self.conn.execute(query, (inodeNum,)).fetchall()
+            if len(results) > 0:
+                inClause = '('
+                for row in results:
+                    inClause = inClause + str(row[0]) + ','
+                inClause = inClause[:-1] + ')'
+
+                query = 'UPDATE hashValues SET refCount = refCount - 1 WHERE hashId in ' + inClause
+                self.__write_log("query=" + query,"")
+                self.conn.execute(query)
+
+            query = 'DELETE FROM fileBlocks WHERE inodeNum = ?'
+            self.conn.execute(query, (inodeNum,))
+            self.__write_log("__delete_old_fileBlockEntries","ended")
+
+        except Exception, e:
+            raise
 
 
   def __get_data_buffer(self, path):
@@ -852,7 +889,9 @@ class dedupeEncFS(fuse.Fuse):
     query = """SELECT h.hashValue from hashValues h, fileBlocks f WHERE f.inodeNum = ?
               AND f.hashId = h.hashId ORDER BY f.blockOrder ASC"""
     resultList = self.conn.execute(query, (fileInode,)).fetchall()
+    self.__write_log("reading file at path:" + str(path),"with inode:" + str(fileInode))
     for row in resultList:
+      self.__write_log("hashKey",":"+ str(row[0]))
       dataBuf.write(self.blocks[row[0]])
 
     self.dataBuffer[path] = dataBuf       #storing in dataBuffer for quick access later
@@ -889,9 +928,9 @@ class dedupeEncFS(fuse.Fuse):
     self.conn.execute(query, (parent_hid, insertedFnameId, insertedInodeNum,))
 
     #if new file is created then insert record in logs table for lazy deduplication to pickup.
-    if nlink == 1 and not isSoftLink:
-      query = 'INSERT INTO logs(inodeNum, path, isNewlyCreated) VALUES (?, ?, 1)'
-      self.conn.execute(query, (insertedInodeNum, sqlite3.Binary(path),))
+    #if nlink == 1 and not isSoftLink:
+    #  query = 'INSERT INTO logs(inodeNum, path) VALUES (?, ?)'
+    #  self.conn.execute(query, (insertedInodeNum, sqlite3.Binary(path),))
     self.__write_log("insertnewnode","ended")
     return insertedInodeNum, parent_inodeNum
 
@@ -911,6 +950,7 @@ class dedupeEncFS(fuse.Fuse):
       self.__write_log("inside getFnameIdFromName after insert query","done")
     self.__write_log("getFnameIdFromName","ended")
     return int(fnameId[0])
+
 
   def __removeFileOrFolder(self, path, emptyCheck=False):
     """
@@ -941,16 +981,14 @@ class dedupeEncFS(fuse.Fuse):
     self.conn.execute(query, (hid,))
     self.__write_log("removeFileorFolder","hierarchy delete for hid:" + str(hid))
 
-    # Decrement the link in inodes table.
+    # Decrement nlink in inodes table.
     query = 'UPDATE inodes SET nlink = nlink - 1 WHERE inodeNum = ?'
     self.conn.execute(query, (inodeNum,))
 
     # Find if currently deleted item is folder from mode.
     query = 'SELECT mode from inodes WHERE inodeNum = ?'
     mode = self.conn.execute(query, (inodeNum,)).fetchone()[0]
-
     if mode & stat.S_IFDIR:
-
       parent_path = os.path.split(path)[0]
       parent_inode = self.__getHidAndInode(parent_path)[1]
       query = 'UPDATE inodes SET nlink = nlink - 1 WHERE inodeNum = ?'
@@ -958,7 +996,9 @@ class dedupeEncFS(fuse.Fuse):
       self.__write_log("removeFileorFolder","updating nlink of parent folder too.")
 
     self.__removePathFromCache(path)
-
+    #if file is modified then remove it's record from log table.
+    query = 'DELETE FROM logs WHERE path = ?'
+    rowCount = self.conn.execute(query, (sqlite3.Binary(path),)).fetchone()
     self.__write_log("RemoveFileorFolder","ended")
 
 
@@ -981,6 +1021,8 @@ class dedupeEncFS(fuse.Fuse):
       else:
         self.__write_log("__removePathFromCache" + path + " not found in cache")
         return
+
+
 
   def __checkAccessInMetaData(self, inodeNum, flags):
     """
@@ -1035,9 +1077,9 @@ class dedupeEncFS(fuse.Fuse):
         CREATE TABLE IF NOT EXISTS inodes(inodeNum INTEGER PRIMARY KEY, nlink INTEGER NOT NULL, mode INTEGER NOT NULL, uid INTEGER, gid INTEGER, dev INTEGER, size INTEGER, atime INTEGER, mtime INTEGER, ctime INTEGER);
         CREATE TABLE IF NOT EXISTS hierarchy(hid INTEGER PRIMARY KEY, parenthid INTEGER, fnameId INTEGER NOT NULL, inodeNum INTEGER, UNIQUE(parenthid, fnameId));
         CREATE TABLE IF NOT EXISTS softlinks(inodeNum INTEGER, target BLOB NOT NULL);
-        CREATE TABLE IF NOT EXISTS hashValues(hashId INTEGER PRIMARY KEY, hashValue BLOB NOT NULL UNIQUE, refCount INTEGER NOT NULL, length INTEGER);
+        CREATE TABLE IF NOT EXISTS hashValues(hashId INTEGER PRIMARY KEY, hashValue TEXT NOT NULL UNIQUE, refCount INTEGER NOT NULL, length INTEGER);
         CREATE TABLE IF NOT EXISTS fileBlocks(inodeNum INTEGER, hashId INTEGER, blockOrder INTEGER NOT NULL, PRIMARY KEY(inodeNum, hashId, blockOrder));
-        CREATE TABLE IF NOT EXISTS logs(inodeNum INTEGER NOT NULL, path BLOB, isNewlyCreated INTEGER);
+        CREATE TABLE IF NOT EXISTS logs(inodeNum INTEGER NOT NULL, path BLOB);
 
         -- Insert default rows for root folder.
         INSERT INTO fileFolderNames (fnameId, fname) VALUES(1, '');

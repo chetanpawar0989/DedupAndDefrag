@@ -65,48 +65,76 @@ class LazyDedupe:
         #1. Get inodes from logs table which are modified on which lazy dedupe will work.
         try:
             self.__write_log("startDedupe in LazyDedupe","called")
-            query = 'SELECT inodeNum, path, isNewlyCreated FROM logs'
+            query = 'SELECT inodeNum, path FROM logs'
             results = self.conn.execute(query).fetchall()
 
             for row in results:
                 inodeNum = row[0]
+                self.__write_log("running for file:","" + str(row[0]) + " " + str(row[1]))
                 #2. For each file changed, get total block of data from fileBlocks table in totalBuf
                 dataBuf = self.__get_data_buffer(inodeNum)
+
                 #2.1. Send totalBuf to RabinKarp to get output{blockNbr:(hashValue, length)}
                 output = self.rbkObj.MatchHashValues(dataBuf, self.blocks)
-                self.__delete_old_fileBlockEntries(inodeNum)
 
-                for blockNbr, hashValue in output:
-                    hashKeyForDB = sqlite3.Binary(hashValue[1])
+                self.__delete_old_fileBlockEntries(inodeNum)
+                self.__write_log("After deleting old entries","")
+                for blockNbr, hashValue in output.iteritems():
+                    self.__write_log("Block no:" + str(blockNbr), " value:(" + str(hashValue[0]) + "," + str(hashValue[1]) + "," + str(hashValue[2]) + ")")
                     #2.2.1 insert in hashValues(hashId, hashValue, length)
                     if not hashValue[0]:
                         query = 'INSERT INTO hashValues(hashId, hashValue, refCount, length) VALUES (NULL, ?, 1, ?)'
-                        self.conn.execute(query, (hashKeyForDB, hashValue[2],))
+                        self.conn.execute(query, (hashValue[1], hashValue[2],))
                         hashId = self.conn.execute('SELECT last_insert_rowid()').fetchone()[0]
                     else:
-                        query = 'UPDATE hashValues SET refCount = refCount + 1 WHERE hashValue = ?'
-                        self.conn.execute(query, (hashKeyForDB,))
-                        hashId = self.conn.execute('SELECT hashId FROM hashValues WHERE hashValue = ?', (hashKeyForDB,)).fetchone()[0]
+                        hashId = self.conn.execute('SELECT hashId FROM hashValues WHERE hashValue = ?', (hashValue[1],)).fetchone()
+                        if not hashId:
+                            query = 'INSERT INTO hashValues(hashId, hashValue, refCount, length) VALUES (NULL, ?, 1, ?)'
+                            self.conn.execute(query, (hashValue[1], hashValue[2],))
+                            hashId = self.conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+                        else:
+                            query = 'UPDATE hashValues SET refCount = refCount + 1 WHERE hashValue = ?'
+                            self.conn.execute(query, (hashValue[1],))
+                            hashId = hashId[0]
+
                     #2.2.2 insert in fileBlocks(inodeNum, last_insert_rowid(), blockNbr)
                     query = 'INSERT INTO fileBlocks(inodeNum, hashId, blockOrder) VALUES (?, ?, ?)'
                     self.conn.execute(query, (inodeNum, hashId, blockNbr))
 
+            self.__write_log("After adding new entries, deleting from logs","")
             #3 delete all inode entries from logs table.
             query = 'DELETE FROM logs'
             self.conn.execute(query)
             self.__write_log("startDedupe in LazyDedupe","ended")
             self.conn.commit()
+            self.__closeConnections()
         except Exception, e:
             self.conn.rollback()
             self.__write_log("startDedupe()","Exception", e)
 
 
 
+
     def __delete_old_fileBlockEntries(self, inodeNum):
-        self.__write_log("__delete_old_fileBlockEntries in LazyDedupe","called")
-        query = 'DELETE FROM fileBlocks WHERE inodeNum = ?'
-        self.conn.execute(query, (inodeNum,))
-        self.__write_log("__delete_old_fileBlockEntries in LazyDedupe","ended")
+        try:
+            self.__write_log("__delete_old_fileBlockEntries in LazyDedupe","called")
+            query = 'SELECT hashId FROM fileBlocks WHERE inodeNum = ?'
+            results = self.conn.execute(query, (inodeNum,)).fetchall()
+            inClause = '('
+            for row in results:
+                inClause = inClause + str(row[0]) + ','
+            inClause = inClause[:-1] + ')'
+
+            query = 'UPDATE hashValues SET refCount = refCount - 1 WHERE hashId in ' + inClause
+            self.__write_log("in __delete_old_fileBlockEntries query=" + query,"")
+            self.conn.execute(query)
+
+            query = 'DELETE FROM fileBlocks WHERE inodeNum = ?'
+            self.conn.execute(query, (inodeNum,))
+            self.__write_log("__delete_old_fileBlockEntries in LazyDedupe","ended")
+
+        except Exception, e:
+            raise
 
 
     def __get_data_buffer(self, inodeNum):
@@ -118,6 +146,7 @@ class LazyDedupe:
                   AND f.hashId = h.hashId ORDER BY f.blockOrder ASC"""
         resultList = self.conn.execute(query, (inodeNum,)).fetchall()
         for row in resultList:
+            self.__write_log("","data:" + self.blocks[row[0]] + " data ended")
             dataBuf.write(self.blocks[row[0]])
 
         self.__write_log("get_data_buffer  in LazyDedupe","ended")
@@ -132,6 +161,34 @@ class LazyDedupe:
         else:
             f.write(function_name +"   " + message + " " + exception.message + "\n")
         f.close()
+
+
+    def printLogs(self):
+        query = 'SELECT * FROM logs'
+        results = self.conn.execute(query).fetchall()
+        print "inode\tpath"
+        for row in results:
+            print str(row[0]) + "\t" + str(row[1])
+
+    def printFileBlocks(self):
+        query = """SELECT f.inodeNum, h.hashValue, h.refCount, h.length, f.blockOrder  FROM fileBlocks f, hashValues h
+                WHERE h.hashId = f.hashId order by f.blockOrder"""
+        results = self.conn.execute(query).fetchall()
+        print "inode\thashkey\tRefCount\tLength\tBlockOrder"
+        for row in results:
+            print str(row[0]) + "\t" + str(row[1]) + "\t" + str(row[2]) + "\t" + str(row[3]) + "\t" + str(row[4])
+
+    def printHashes(self):
+        query = 'SELECT * FROM hashValues'
+        results = self.conn.execute(query).fetchall()
+        print "hashId\thashkey\tRefCount\tLength"
+        for row in results:
+            print str(row[0]) + "\t" + str(row[1]) + "\t" + str(row[2]) + "\t" + str(row[3])
+
+    def __closeConnections(self):
+        self.conn.commit()
+        self.conn.close()
+        self.blocks.close()
 
 
 if __name__ == '__main__':

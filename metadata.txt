@@ -7,11 +7,11 @@ CREATE TABLE IF NOT EXISTS hierarchy(hid INTEGER PRIMARY KEY, parenthid INTEGER,
 
 CREATE TABLE IF NOT EXISTS softlinks(inodeNum INTEGER, target BLOB NOT NULL)
 
-CREATE TABLE IF NOT EXISTS hashValues(hashId INTEGER PRIMARY KEY, hashValue BLOB NOT NULL UNIQUE, refCount INTEGER NOT NULL, length INTEGER)
+CREATE TABLE IF NOT EXISTS hashValues(hashId INTEGER PRIMARY KEY, hashValue INTEGER NOT NULL UNIQUE, refCount INTEGER NOT NULL, length INTEGER)
 
 CREATE TABLE IF NOT EXISTS fileBlocks(inodeNum INTEGER, hashId INTEGER, blockOrder INTEGER NOT NULL, PRIMARY KEY(inodeNum, hashId, blockOrder))
 
-CREATE TABLE IF NOT EXISTS logs(inodeNum INTEGER NOT NULL, path BLOB, isNewlyCreated INTEGER)
+CREATE TABLE IF NOT EXISTS logs(inodeNum INTEGER NOT NULL, path BLOB)
 ------------------------------------------------------------------------------------------------------------------
 
 -- Insert default rows for root folder.
