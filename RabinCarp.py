@@ -4,20 +4,41 @@ import sqlite3
 import gdbm
 import cStringIO
 
-class RabinCarp:
+class RabinKarp:
 
     def __init__(self):
         """
         Initialize variables you want to use.
         """
         self.defaultLength = 1028
+        self.base = 256  #base used for hash calculation
+        self.primary_number = 5915587277  # random long prime number
+        self.RM = 1 # to calculate new hash from previous hash
+        self.__computeRM()
 
+    def __computeRM(self):
+    """
+     calculate R^(length-1) for assisting in hash calculation
+    """
+    for i in range(self.default_block_size-1):
+         self.RM = (self.base * self.RM) % self.primary_number;
+    
 
     def ComputeHash(self, data, ph=0, pc=None):
         """
-        Computes hash Value of data
+          This function will calculate hash value of of data block. As Rabin Karp algorithm uses rolling hash mechanism, we
+          are using previous hash and first character of previous data block to calculate new hash
         """
-        return 0
+        new_hash_value = 0
+        if (previous_hash == 0):
+            for index in range(len(data)):
+                new_hash_value = (self.base * new_hash_value + ord(data[index])) % self.primary_number
+            return new_hash_value
+        else:
+            new_hash_value = (previous_hash + self.primary_number - (self.RM * ord(previous_char))%self.primary_number)%self.primary_number
+            new_hash_value = (new_hash_value*self.base + ord(data[len(data)-1]))%self.primary_number
+            return new_hash_value
+
 
     def MatchHashValues(self, dataBuf, blocks):
         """
