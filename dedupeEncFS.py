@@ -17,7 +17,7 @@ import sqlite3
 import cStringIO
 from errno import *
 import hashlib
-import RabinCarp
+import RabinKarp
 
 SUCCESS, FAIL = 0, -1
 
@@ -801,11 +801,12 @@ class dedupeEncFS(fuse.Fuse):
     # Store new block as a single block.
     buf.seek(0, os.SEEK_SET)
     data = buf.read(size)
-    #rpk = RabinKarp()
-    #hashKey = rpk.getHashKey(data)
-    temp = self.hashFunction()
-    temp.update(data)
-    hashKey = temp.hexdigest()
+    rpk = RabinKarp()
+    hashKey = rpk.ComputeHash(data)
+
+    #temp = self.hashFunction()
+    #temp.update(data)
+    #hashKey = temp.hexdigest()
     hashKeyForDB = sqlite3.Binary(hashKey)
 
     self.blocks[hashKey] = data

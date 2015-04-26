@@ -4,7 +4,7 @@ import os
 import sqlite3
 import gdbm
 import cStringIO
-from RabinCarp import RabinCarp
+from RabinKarp import RabinKarp
 
 class LazyDedupe:
 
@@ -21,7 +21,7 @@ class LazyDedupe:
         self.conn.text_factory = str    #to return regular strings
         self.conn.execute('PRAGMA locking_mode = EXCLUSIVE')
         self.blocks = gdbm.open(self.blockDBPath, 'cs')
-        self.rbkObj = RabinCarp()
+        self.rbkObj = RabinKarp()
 
 
     def clearCache(self):
@@ -55,7 +55,7 @@ class LazyDedupe:
         """
         1. Get inodes from logs table which are modified on which lazy dedupe will work.
         2. For each file changed, get total block of data from fileBlocks table in totalBuf
-            2.1. Send totalBuf to RabinCarp to get output{blockNbr:(alreadyPresent(0/1), hashValue, length)}
+            2.1. Send totalBuf to RabinKarp to get output{blockNbr:(alreadyPresent(0/1), hashValue, length)}
             2.2 for each item in output:
                 2.2.1 insert in hashValues(hashId, hashValue, length)
                 2.2.2 insert in fileBlocks(inodeNum, last_insert_rowid(), blockNbr)
@@ -72,7 +72,7 @@ class LazyDedupe:
                 inodeNum = row[0]
                 #2. For each file changed, get total block of data from fileBlocks table in totalBuf
                 dataBuf = self.__get_data_buffer(inodeNum)
-                #2.1. Send totalBuf to RabinCarp to get output{blockNbr:(hashValue, length)}
+                #2.1. Send totalBuf to RabinKarp to get output{blockNbr:(hashValue, length)}
                 output = self.rbkObj.MatchHashValues(dataBuf, self.blocks)
                 self.__delete_old_fileBlockEntries(inodeNum)
 
