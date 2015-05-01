@@ -10,7 +10,7 @@ class RabinKarp:
         """
         Initialize variables you want to use.
         """
-        self.defaultLength = 10
+        self.defaultLength = 1000
         self.base = 256  #base used for hash calculation
         self.primary_number = 5915587277  # random long prime number
         self.RM = 1 # to calculate new hash from previous hash
@@ -69,9 +69,14 @@ class RabinKarp:
         self.__write_log("MatchHashValues", "data:"+data + " totallength:" + str(totalLength))
         previousHash = None
         previousChar = None
+        if finish > totalLength:
+            self.__write_log("Block size less than default block size", "Not doing dedupe")
+            self.__write_log("MatchHashValues", "ended with:" + str(len(output)))
+            return output
+
         while finish <= totalLength:
             self.__write_log("start:" +str(start) + " finish:" + str(finish), "startptr:"+ str(startPtr))
-            if startPtr - start == self.defaultLength:
+            if start - startPtr == self.defaultLength:
                 self.__write_log("Inside first if", "")
                 hashValue = self.ComputeHash(data[startPtr:start])
                 blocks[hashValue] = data[startPtr:start]
@@ -95,9 +100,9 @@ class RabinKarp:
                         self.__write_log("Added 2", "data:" + data[startPtr:start] + " at block:" + str(blockNbr))
                         blockNbr += 1
                     self.__write_log("Added 3", "data:" + data[start:finish] + " at block:" + str(blockNbr))
-                    output[blockNbr] = (1, previousHash, self.defaultLength)
+                    output[blockNbr] = (1, previousHash, finish-start)
                     blockNbr += 1
-                    start = finish + 1
+                    start = finish
                     if start + self.defaultLength > totalLength:
                         finish = totalLength
                     else:
@@ -108,17 +113,31 @@ class RabinKarp:
                 else:
                     if finish == totalLength:
                         if start != startPtr:
+                            #Adding starting part of defaultLength
+                            start = startPtr + self.defaultLength
                             hashValue = self.ComputeHash(data[startPtr:start])
+                            if hashValue in blocks:
+                                output[blockNbr] = (1, hashValue, self.defaultLength)
+                            else:
+                                output[blockNbr] = (0, hashValue, self.defaultLength)
                             blocks[hashValue] = data[startPtr:start]
                             self.__write_log("Added 4", "data:" + data[startPtr:start] + " at block:" + str(blockNbr))
-                            if hashValue in blocks:
-                                output[blockNbr] = (1, hashValue, start-startPtr)
-                            else:
-                                output[blockNbr] = (0, hashValue, start-startPtr)
                             blockNbr += 1
-                        self.__write_log("Added 5", "data:" + data[start:finish] + " at block:" + str(blockNbr))
-                        blocks[previousHash] = data[start:finish]
-                        output[blockNbr] = (0, previousHash, self.defaultLength)
+
+                            #Adding trailing part upto finish
+                            hashValue = self.ComputeHash(data[start:finish])
+                            if hashValue in blocks:
+                                output[blockNbr] = (1, hashValue, finish-start)
+                            else:
+                                output[blockNbr] = (0, hashValue, finish-start)
+                            blocks[hashValue] = data[start:finish]
+                            self.__write_log("Added 5", "data:" + data[start:finish] + " at block:" + str(blockNbr))
+                            blockNbr += 1
+                        else:
+                            self.__write_log("Added 6", "data:" + data[start:finish] + " at block:" + str(blockNbr))
+                            blocks[previousHash] = data[start:finish]
+                            output[blockNbr] = (0, previousHash, finish-start)
+                            blockNbr += 1
                     start += 1
                     finish += 1
         self.__write_log("MatchHashValues", "ended with:" + str(len(output)))

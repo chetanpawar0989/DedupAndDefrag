@@ -821,7 +821,7 @@ class dedupeEncFS(fuse.Fuse):
         if not hashId:
             query = 'INSERT INTO hashValues(hashId, hashValue, refCount, length) VALUES (NULL, ?, 1,?)'
             self.conn.execute(query, (hashKey, len(data),))
-            hashId = self.conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            hashId = self.conn.execute('SELECT last_insert_rowid() as a').fetchone()[0]
         else:
             query = 'UPDATE hashValues SET refCount = refCount + 1 WHERE hashValue = ?'
             self.conn.execute(query, (hashKey,))
@@ -829,7 +829,7 @@ class dedupeEncFS(fuse.Fuse):
     else:
         query = 'INSERT INTO hashValues(hashId, hashValue, refCount, length) VALUES (NULL, ?, 1,?)'
         self.conn.execute(query, (hashKey, len(data),))
-        hashId = self.conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+        hashId = self.conn.execute('SELECT last_insert_rowid() as a').fetchone()[0]
 
     self.blocks[hashKey] = data
 
@@ -921,7 +921,7 @@ class dedupeEncFS(fuse.Fuse):
 
     query = 'INSERT INTO inodes (nlink, mode, uid, gid, dev, size, atime, mtime, ctime) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
     self.conn.execute(query, (nlink, mode, context['uid'], context['gid'], dev, size, t, t, t))
-    insertedInodeNum = self.conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+    insertedInodeNum = self.conn.execute('SELECT last_insert_rowid() as a').fetchone()[0]
     insertedFnameId = self.__GetFnameIdFromName(child)
 
     query = 'INSERT INTO hierarchy (parenthid, fnameId, inodeNum) VALUES (?, ?, ?)'
@@ -946,7 +946,7 @@ class dedupeEncFS(fuse.Fuse):
     self.__write_log("inside getFnameIdFromName after select query","done")
     if not fnameId:    #file/folder not present. insert new one.
       self.conn.execute('INSERT INTO fileFolderNames (fnameId, fname) VALUES (NULL, ?)', (fname,))
-      fnameId = self.conn.execute('SELECT last_insert_rowid()').fetchone()
+      fnameId = self.conn.execute('SELECT last_insert_rowid() as a').fetchone()
       self.__write_log("inside getFnameIdFromName after insert query","done")
     self.__write_log("getFnameIdFromName","ended")
     return int(fnameId[0])
@@ -983,6 +983,11 @@ class dedupeEncFS(fuse.Fuse):
 
     # Decrement nlink in inodes table.
     query = 'UPDATE inodes SET nlink = nlink - 1 WHERE inodeNum = ?'
+    self.conn.execute(query, (inodeNum,))
+
+    # Decrease refCount of blocks if available for corresponding inode
+    query = """UPDATE hashValues SET refCount = refCount-1 WHERE hashValue in
+            (SELECT hashValue FROM fileFolderNames WHERE inodeNum = ?)"""
     self.conn.execute(query, (inodeNum,))
 
     # Find if currently deleted item is folder from mode.
@@ -1080,6 +1085,14 @@ class dedupeEncFS(fuse.Fuse):
         CREATE TABLE IF NOT EXISTS hashValues(hashId INTEGER PRIMARY KEY, hashValue TEXT NOT NULL UNIQUE, refCount INTEGER NOT NULL, length INTEGER);
         CREATE TABLE IF NOT EXISTS fileBlocks(inodeNum INTEGER, hashId INTEGER, blockOrder INTEGER NOT NULL, PRIMARY KEY(inodeNum, hashId, blockOrder));
         CREATE TABLE IF NOT EXISTS logs(inodeNum INTEGER NOT NULL, path BLOB);
+        CREATE TABLE IF NOT EXISTS snapshots(snapId INTEGER PRIMARY KEY, startTime INTEGER, endTime Integer);
+
+        -- Creating snapshot tables:
+        CREATE TABLE IF NOT EXISTS inodesArch(snapId INTEGER, inodeNum INTEGER, nlink INTEGER NOT NULL, mode INTEGER NOT NULL, uid INTEGER, gid INTEGER, dev INTEGER, size INTEGER, atime INTEGER, mtime INTEGER, ctime INTEGER);
+        CREATE TABLE IF NOT EXISTS hierarchyArch(snapId INTEGER, hid INTEGER, parenthid INTEGER, fnameId INTEGER NOT NULL, inodeNum INTEGER);
+        CREATE TABLE IF NOT EXISTS softlinksArch(snapId INTEGER, inodeNum INTEGER, target BLOB NOT NULL);
+        CREATE TABLE IF NOT EXISTS hashValuesArch(snapId INTEGER, hashId INTEGER, hashValue INTEGER, refCount INTEGER NOT NULL, length INTEGER);
+        CREATE TABLE IF NOT EXISTS fileBlocksArch(snapId INTEGER, inodeNum INTEGER, hashId INTEGER, blockOrder INTEGER NOT NULL);
 
         -- Insert default rows for root folder.
         INSERT INTO fileFolderNames (fnameId, fname) VALUES(1, '');

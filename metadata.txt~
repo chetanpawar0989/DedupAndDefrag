@@ -1,4 +1,4 @@
--- Creating the tables
+--Creating the tables
 CREATE TABLE IF NOT EXISTS fileFolderNames(fnameId INTEGER PRIMARY KEY, fname BLOB NOT NULL);
 
 CREATE TABLE IF NOT EXISTS inodes(inodeNum INTEGER PRIMARY KEY, nlink INTEGER NOT NULL, mode INTEGER NOT NULL, uid INTEGER, gid INTEGER, dev INTEGER, size INTEGER, atime INTEGER, mtime INTEGER, ctime INTEGER);
