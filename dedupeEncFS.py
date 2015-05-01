@@ -1180,12 +1180,13 @@ class dedupeEncFS(fuse.Fuse):
       return length
 
   def __write_log(self,function_name,message="",exception=""):
-      f = open('/home/chetanpawar0989/log.txt','a')
-      if(exception == ""):
-        f.write(function_name +"   " + message + "\n")
-      else:
-        f.write(function_name +"   " + message + " " + exception.message + "\n")
-      f.close()
+      # f = open('/home/chetanpawar0989/log.txt','a')
+      # if(exception == ""):
+      #   f.write(function_name +"   " + message + "\n")
+      # else:
+      #   f.write(function_name +"   " + message + " " + exception.message + "\n")
+      # f.close()
+      pass
 
 
 if __name__ == '__main__':

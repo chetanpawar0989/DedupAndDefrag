@@ -48,9 +48,9 @@ class LazyDedupe:
 
             # Decreasing refCount of blocks for unused inodes
             query = """UPDATE hashValues SET refCount = refCount-1 WHERE hashValue in
-                    (SELECT hashValue FROM fileFolderNames WHERE inodeNum in
+                    (SELECT hashValue FROM fileBlocks WHERE inodeNum in
                     (SELECT inodeNum FROM inodes WHERE nlink <= 0))"""
-            self.conn.execute('UPDATE hashValues SET refCount = refCount-1 WHERE hashValue in ())')
+            self.conn.execute(query)
 
             # Removing unused inodes
             self.conn.execute('DELETE FROM inodes WHERE nlink <= 0')
@@ -59,10 +59,13 @@ class LazyDedupe:
             hashKeys = self.conn.execute('SELECT hashValue FROM hashValues WHERE refCount <= 0').fetchall()
             for hk in hashKeys:
                 if hk[0] in self.blocks:
+                    self.__write_log("Deleted hashkey " + str(hk[0]),"from datastore")
                     del self.blocks[hk[0]]
 
+            self.blocks.reorganize()
             self.conn.execute('DELETE FROM hashValues WHERE refCount <= 0')
             self.conn.commit()
+            self.__closeConnections()
             self.__write_log("clearCache in LazyDedupe","ended")
         except Exception, e:
             self.conn.rollback()
@@ -150,12 +153,9 @@ class LazyDedupe:
         try:
             self.__write_log("backUpTables","called")
             results = self.conn.execute('SELECT ? as snapId, i.* FROM inodes i', (snapId,)).fetchall()
-            print results
             if len(results) > 0:
-                self.__write_log("inodes table backup","started" + str(type(results[0])))
                 query = 'INSERT INTO inodesArch VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
                 self.conn.executemany(query, results)
-                self.__write_log("inodes table backup","done")
 
             results = self.conn.execute('SELECT ? as snapId, h.* FROM hierarchy h', (snapId,)).fetchall()
             if len(results) > 0:
@@ -197,7 +197,6 @@ class LazyDedupe:
                 inClause = inClause[:-1] + ')'
 
                 query = 'UPDATE hashValues SET refCount = refCount - 1 WHERE hashId in ' + inClause
-                self.__write_log("in __delete_old_fileBlockEntries query=" + query,"")
                 self.conn.execute(query)
 
             query = 'DELETE FROM fileBlocks WHERE inodeNum = ?'
@@ -217,7 +216,6 @@ class LazyDedupe:
                   AND f.hashId = h.hashId ORDER BY f.blockOrder ASC"""
         resultList = self.conn.execute(query, (inodeNum,)).fetchall()
         for row in resultList:
-            self.__write_log("","data:" + self.blocks[row[0]] + " data ended")
             dataBuf.write(self.blocks[row[0]])
 
         self.__write_log("get_data_buffer  in LazyDedupe","ended")
@@ -283,6 +281,8 @@ class LazyDedupe:
         self.conn.commit()
         self.conn.close()
         self.blocks.close()
+        import gc
+        gc.collect()
 
 
 if __name__ == '__main__':

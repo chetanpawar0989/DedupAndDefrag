@@ -20,7 +20,6 @@ class RabinKarp:
         """
          calculate R^(length-1) for assisting in hash calculation
         """
-        self.__write_log("__computeRM", "called")
         for i in range(self.defaultLength-1):
              self.RM = (self.base * self.RM) % self.primary_number
     
@@ -30,19 +29,19 @@ class RabinKarp:
           This function will calculate hash value of of data block. As Rabin Karp algorithm uses rolling hash mechanism, we
           are using previous hash and first character of previous data block to calculate new hash
         """
-        self.__write_log("ComputeHash", "called: data=" + str(data) + " length:" + str(len(data)))
+        #self.__write_log("ComputeHash", "called for length:" + str(len(data)))
         new_hash_value = 0
         if not ph:
             for index in range(len(data)):
-                self.__write_log("ComputeHash", "index=" + str(index))
+                #self.__write_log("ComputeHash", "index=" + str(index))
                 new_hash_value = (self.base * new_hash_value + ord(data[index])) % self.primary_number
-            self.__write_log("ComputeHash", "ended. return:"+str(new_hash_value))
+            #self.__write_log("ComputeHash", "ended. return:"+str(new_hash_value))
             return str(new_hash_value)
         else:
             ph = int(ph)
             new_hash_value = (ph + self.primary_number - (self.RM * ord(pc))%self.primary_number)%self.primary_number
             new_hash_value = (new_hash_value*self.base + ord(data[len(data)-1]))%self.primary_number
-            self.__write_log("ComputeHash", "ended. return:"+str(new_hash_value))
+            #self.__write_log("ComputeHash", "ended. return:"+str(new_hash_value))
             return str(new_hash_value)
 
 
@@ -58,7 +57,7 @@ class RabinKarp:
         3.3 if not then just increment start and finish
         :return: output{blockNbr:(alreadyPresent(0/1), hashValue, length)}
         """
-        self.__write_log("MatchHashValues", "called")
+
         output = {}
         blockNbr, startPtr = 0, 0
         start, finish = 0, self.defaultLength
@@ -66,29 +65,30 @@ class RabinKarp:
         dataBuf.seek(0)
         data = dataBuf.read()
         totalLength = len(data)
-        self.__write_log("MatchHashValues", "data:"+data + " totallength:" + str(totalLength))
+        #self.__write_log("MatchHashValues", "data:"+data + " totallength:" + str(totalLength))
         previousHash = None
         previousChar = None
+        self.__write_log("MatchHashValues", "called. totallength:"+str(totalLength))
         if finish > totalLength:
-            self.__write_log("Block size less than default block size", "Not doing dedupe")
-            self.__write_log("MatchHashValues", "ended with:" + str(len(output)))
+            #self.__write_log("Block size less than default block size", "Not doing dedupe")
+            #self.__write_log("MatchHashValues", "ended with:" + str(len(output)))
             return output
 
-        while finish <= totalLength:
-            self.__write_log("start:" +str(start) + " finish:" + str(finish), "startptr:"+ str(startPtr))
+        while finish <= totalLength and finish != start:
+            #self.__write_log("start:" +str(start) + " finish:" + str(finish), "startptr:"+ str(startPtr))
             if start - startPtr == self.defaultLength:
-                self.__write_log("Inside first if", "")
+                #self.__write_log("Inside first if", "")
                 hashValue = self.ComputeHash(data[startPtr:start])
                 blocks[hashValue] = data[startPtr:start]
                 output[blockNbr] = (0, hashValue, self.defaultLength)
-                self.__write_log("Added 1", "data:" + data[startPtr:start] + " at block:" + str(blockNbr))
+                self.__write_log("Added 1", "from start:" + str(startPtr) + " to finish:" + str(start-1) + " at block:" + str(blockNbr))
                 blockNbr += 1
                 startPtr = start
             else:
-                self.__write_log("Inside first else", "")
+                #self.__write_log("Inside first else", "")
                 previousHash = self.ComputeHash(data[start:finish], ph=previousHash, pc=previousChar)
                 previousChar = data[start]
-                self.__write_log("After ComputeHash", "previousChar:" + previousChar)
+                #self.__write_log("After ComputeHash", "previousChar:" + previousChar)
                 if previousHash in blocks:
                     if start != startPtr:
                         hashValue = self.ComputeHash(data[startPtr:start])
@@ -97,9 +97,9 @@ class RabinKarp:
                             output[blockNbr] = (1, hashValue, start-startPtr)
                         else:
                             output[blockNbr] = (0, hashValue, start-startPtr)
-                        self.__write_log("Added 2", "data:" + data[startPtr:start] + " at block:" + str(blockNbr))
+                        self.__write_log("Added 2", "from start:" + str(startPtr) + " to finish:" + str(start-1) + " at block:" + str(blockNbr))
                         blockNbr += 1
-                    self.__write_log("Added 3", "data:" + data[start:finish] + " at block:" + str(blockNbr))
+                    self.__write_log("Added 3", "from start:" + str(start) + " to finish:" + str(finish-1) + " at block:" + str(blockNbr))
                     output[blockNbr] = (1, previousHash, finish-start)
                     blockNbr += 1
                     start = finish
@@ -121,7 +121,7 @@ class RabinKarp:
                             else:
                                 output[blockNbr] = (0, hashValue, self.defaultLength)
                             blocks[hashValue] = data[startPtr:start]
-                            self.__write_log("Added 4", "data:" + data[startPtr:start] + " at block:" + str(blockNbr))
+                            self.__write_log("Added 4", "from start:" + str(startPtr) + " to finish:" + str(start-1) + " at block:" + str(blockNbr))
                             blockNbr += 1
 
                             #Adding trailing part upto finish
@@ -131,13 +131,14 @@ class RabinKarp:
                             else:
                                 output[blockNbr] = (0, hashValue, finish-start)
                             blocks[hashValue] = data[start:finish]
-                            self.__write_log("Added 5", "data:" + data[start:finish] + " at block:" + str(blockNbr))
+                            self.__write_log("Added 5", "from start:" + str(start) + " to finish:" + str(finish-1) + " at block:" + str(blockNbr))
                             blockNbr += 1
                         else:
-                            self.__write_log("Added 6", "data:" + data[start:finish] + " at block:" + str(blockNbr))
+                            self.__write_log("Added 6", "from start:" + str(start) + " to finish:" + str(finish-1) + " at block:" + str(blockNbr))
                             blocks[previousHash] = data[start:finish]
                             output[blockNbr] = (0, previousHash, finish-start)
                             blockNbr += 1
+                        break
                     start += 1
                     finish += 1
         self.__write_log("MatchHashValues", "ended with:" + str(len(output)))
