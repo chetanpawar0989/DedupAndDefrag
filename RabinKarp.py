@@ -1,8 +1,9 @@
 
 import os
-import sqlite3
-import gdbm
-import cStringIO
+from Crypto.Cipher import DES
+
+
+EncryptionKey = "wolfpack"
 
 class RabinKarp:
 
@@ -10,7 +11,7 @@ class RabinKarp:
         """
         Initialize variables you want to use.
         """
-        self.defaultLength = 1000
+        self.defaultLength = 10
         self.base = 256  #base used for hash calculation
         self.primary_number = 5915587277  # random long prime number
         self.RM = 1 # to calculate new hash from previous hash
@@ -74,12 +75,15 @@ class RabinKarp:
             #self.__write_log("MatchHashValues", "ended with:" + str(len(output)))
             return output
 
+        DESObj = DES.new(EncryptionKey, DES.MODE_ECB)
+
         while finish <= totalLength and finish != start:
             #self.__write_log("start:" +str(start) + " finish:" + str(finish), "startptr:"+ str(startPtr))
             if start - startPtr == self.defaultLength:
                 #self.__write_log("Inside first if", "")
                 hashValue = self.ComputeHash(data[startPtr:start])
-                blocks[hashValue] = data[startPtr:start]
+                self.__EncryptAndInsertData(blocks, hashValue, data[startPtr:start])
+                #blocks[hashValue] = data[startPtr:start]
                 output[blockNbr] = (0, hashValue, self.defaultLength)
                 self.__write_log("Added 1", "from start:" + str(startPtr) + " to finish:" + str(start-1) + " at block:" + str(blockNbr))
                 blockNbr += 1
@@ -92,7 +96,8 @@ class RabinKarp:
                 if previousHash in blocks:
                     if start != startPtr:
                         hashValue = self.ComputeHash(data[startPtr:start])
-                        blocks[hashValue] = data[startPtr:start]
+                        self.__EncryptAndInsertData(blocks, hashValue, data[startPtr:start])
+                        #blocks[hashValue] = data[startPtr:start]
                         if hashValue in blocks:
                             output[blockNbr] = (1, hashValue, start-startPtr)
                         else:
@@ -120,7 +125,8 @@ class RabinKarp:
                                 output[blockNbr] = (1, hashValue, self.defaultLength)
                             else:
                                 output[blockNbr] = (0, hashValue, self.defaultLength)
-                            blocks[hashValue] = data[startPtr:start]
+                            self.__EncryptAndInsertData(blocks, hashValue, data[startPtr:start])
+                            #blocks[hashValue] = data[startPtr:start]
                             self.__write_log("Added 4", "from start:" + str(startPtr) + " to finish:" + str(start-1) + " at block:" + str(blockNbr))
                             blockNbr += 1
 
@@ -130,12 +136,15 @@ class RabinKarp:
                                 output[blockNbr] = (1, hashValue, finish-start)
                             else:
                                 output[blockNbr] = (0, hashValue, finish-start)
-                            blocks[hashValue] = data[start:finish]
+                            self.__EncryptAndInsertData(blocks, hashValue, data[start:finish])
+                            #blocks[hashValue] = data[start:finish]
                             self.__write_log("Added 5", "from start:" + str(start) + " to finish:" + str(finish-1) + " at block:" + str(blockNbr))
                             blockNbr += 1
                         else:
                             self.__write_log("Added 6", "from start:" + str(start) + " to finish:" + str(finish-1) + " at block:" + str(blockNbr))
-                            blocks[previousHash] = data[start:finish]
+                            hashValue = self.ComputeHash(data[start:finish])
+                            self.__EncryptAndInsertData(blocks, hashValue, data[start:finish])
+                            #blocks[previousHash] = data[start:finish]
                             output[blockNbr] = (0, previousHash, finish-start)
                             blockNbr += 1
                         break
@@ -145,6 +154,17 @@ class RabinKarp:
         return output
 
 
+    def __EncryptAndInsertData(self, blocks, hashValue, data):
+        """
+        Encrypts given data of given length
+        """
+        length = len(data)
+        paddingLength = 8 - (length % 8)
+        for i in range(paddingLength):
+            data = data + 'X'
+
+        DESObj = DES.new(EncryptionKey, DES.MODE_ECB)
+        blocks[hashValue] = DESObj.encrypt(data)
 
 
     def __getSizeOfBuffer(self, buf):

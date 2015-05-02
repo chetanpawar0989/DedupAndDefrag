@@ -8,6 +8,9 @@ import time
 from datetime import datetime
 from RabinKarp import RabinKarp
 from collections import namedtuple
+from Crypto.Cipher import DES
+
+EncryptionKey = "wolfpack"
 
 def namedtuple_factory(cursor, row):
         """
@@ -216,12 +219,18 @@ class LazyDedupe:
 
         dataBuf = cStringIO.StringIO()
 
-        query = """SELECT h.hashValue from hashValues h, fileBlocks f WHERE f.inodeNum = ?
+        query = """SELECT h.hashValue, h.length from hashValues h, fileBlocks f WHERE f.inodeNum = ?
                   AND f.hashId = h.hashId ORDER BY f.blockOrder ASC"""
         resultList = self.conn.execute(query, (inodeNum,)).fetchall()
-        for row in resultList:
-            dataBuf.write(self.blocks[row[0]])
+        DESObj = DES.new(EncryptionKey, DES.MODE_ECB)
 
+        data = ""
+        for row in resultList:
+            tempData = DESObj.decrypt(self.blocks[row[0]])
+            tempData = tempData[0:row[1]]
+            data = data + tempData
+
+        dataBuf.write(data)
         self.__write_log("get_data_buffer  in LazyDedupe","ended")
         return dataBuf
 
