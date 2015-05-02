@@ -334,14 +334,11 @@ class dedupeEncFS(fuse.Fuse):
       self.conn.close()
 
       #closing gdbm DB object
+      self.blocks.reorganize()
       self.blocks.close()
 
       #deleting cached nods
       del self.nodes
-
-      #garbage collection
-      import gc
-      gc.collect()
 
       self.__write_log("Fsdestroy","ended")
       #self.f.close()
@@ -537,18 +534,13 @@ class dedupeEncFS(fuse.Fuse):
       self.__logMessage(msg)
 
       path_hid, path_inode = self.__getHidAndInode(path)
-      self.__write_log("__gethidAndInode in readdir successfully","called")
-
       #Default directory pointers adding to direntry of fuse
       yield fuse.Direntry('.', ino = path_inode)
       yield fuse.Direntry('..')
 
-      self.__write_log("path_hid:" + str(path_hid) + " path_node:" + str(path_inode),"called")
-
       #get all the files and folders inside path by querying hierarchy table
       query = 'SELECT h.inodeNum, f.fname FROM hierarchy h, fileFolderNames f WHERE h.parenthid = ? AND h.fnameId = f.fnameId'
       resultList = self.conn.execute(query, (path_hid,)).fetchall()
-      self.__write_log("query in readdir successfully","called")
 
       for file in resultList:
         yield fuse.Direntry(str(file[1]), ino=file[0])
@@ -630,7 +622,7 @@ class dedupeEncFS(fuse.Fuse):
       self.__write_log("rename","exception",e)
       #ToDo: To write exception in console and in log.
       self.conn.rollback()
-      return FAIL
+      return -ENOTEMPTY
 
 
   def rmdir(self, path):
@@ -651,7 +643,7 @@ class dedupeEncFS(fuse.Fuse):
     except Exception, e:
       self.__write_log("rmdir","exception",e)
       #ToDo: To write exception in console and in log.
-      return FAIL
+      return -ENOTEMPTY
 
 
   def statfs(self):

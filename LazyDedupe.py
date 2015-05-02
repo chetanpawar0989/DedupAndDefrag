@@ -142,6 +142,10 @@ class LazyDedupe:
             query = 'DELETE FROM logs'
             self.conn.execute(query)
             self.__write_log("startDedupe in LazyDedupe","ended")
+            #Updating end time for snapshot creation
+            t = time.time()
+            query = 'UPDATE snapshots SET endTime = ? WHERE snapId = ?'
+            self.conn.execute(query, (snapId, t,))
             self.conn.commit()
             self.__closeConnections()
         except Exception, e:
@@ -235,7 +239,7 @@ class LazyDedupe:
     def printSnapshots(self):
         query = 'SELECT * FROM snapshots'
         results = self.conn.execute(query).fetchall()
-        print "snapshotId\tstartTime\tendTime"
+        print "Id\tstartTime\t\t\tendTime"
         for row in results:
             print str(row[0]) + "\t" + str(datetime.fromtimestamp(float(row[1]))) + "\t" + str(datetime.fromtimestamp(float(row[2])))
         self.__closeConnections()
