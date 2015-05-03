@@ -31,6 +31,10 @@ def main():
 
    arguments = server.parse(['-o', 'use_ino,default_permissions,fsname=dedupeEncfs'] + sys.argv[1:])
 
+
+
+
+
    if arguments.mountpoint or not server.fuse_args.mount_expected():
     msg = "DedupeEncFS Filesystem initialized. mountpoint = " + arguments.mountpoint
     print msg
@@ -66,6 +70,9 @@ class dedupeEncFS(fuse.Fuse):
       self.defaultFileSize = 0            #Default file size = 0kb when created
       self.hashFunction = getattr(hashlib, "md5")
 
+
+      self.parser.add_option('--key', dest='key', metavar='BYTES', default=" ", help="Enter the key to decrypt data")
+
     except Exception, e:
       print 'Exception in __init__() method'
       sys.exit(1)
@@ -89,6 +96,8 @@ class dedupeEncFS(fuse.Fuse):
       tstart = datetime.datetime.now()
       self.blockDBPath = os.path.expanduser(self.blockDatabase)
       self.metaDBPath = os.path.expanduser(self.metaDatabase)
+      self.key = self.cmdline[0].key
+
 
       #creating database for storing blocks and metadata
       msg = "Creating database :\n"
@@ -790,14 +799,18 @@ class dedupeEncFS(fuse.Fuse):
     #uidKey = uidKey[0:8]
     DESObj = DES.new(EncryptionKey, DES.MODE_ECB)
 
-    data = ""
-    for row in resultList:
-      #Decrypting the data before getting data from gdbm database.
-      tempData = DESObj.decrypt(self.blocks[row[0]])
-      tempData = tempData[0:row[1]]
-      data = data + tempData
+    if self.key == EncryptionKey:
+        data = ""
+        for row in resultList:
+          #Decrypting the data before getting data from gdbm dattftabase.
+          tempData = DESObj.decrypt(self.blocks[row[0]])
+          tempData = tempData[0:row[1]]
+          data = data + tempData
 
-    dataBuf.write(data)
+        dataBuf.write(data)
+    else:
+        for row in resultList:
+            dataBuf.write(self.blocks[row[0]])
     self.dataBuffer[path] = dataBuf       #storing in dataBuffer for quick access later
     self.dirtyPaths[path] = False     #storing that buffer is not modified currently.
     #self.__write_log("get_data_buffer","ended")
@@ -1064,12 +1077,12 @@ class dedupeEncFS(fuse.Fuse):
       return length
 
   def __write_log(self,function_name,message="",exception=""):
-      f = open('/home/chetanpawar0989/log.txt','a')
-      if(exception == ""):
-        f.write(function_name +"   " + message + "\n")
-      else:
-        f.write(function_name +"   " + message + " " + exception.message + "\n")
-      f.close()
+   #   f = open('/home/chetanpawar0989/log.txt','a')
+   #   if(exception == ""):
+   #     f.write(function_name +"   " + message + "\n")
+   #   else:
+   #     f.write(function_name +"   " + message + " " + exception.message + "\n")
+   #   f.close()
       pass
 
 
