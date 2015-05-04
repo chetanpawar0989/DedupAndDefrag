@@ -5,3 +5,20 @@
 - Adding functionality to restore back to particular snapshot.
 - Adding functionality to see the actual file system size. - DONE
 - Creating a script to unmount a file system.
+
+
+Test cases:
+1) test file creation, read, write, edit, copy, move and delete operation. --- success
+2) create atleast two files and check following things --- Success
+   printInodes
+   printLogs
+   printFileBlocks
+   printHashes
+3) create atleast two file with same content and check if eager deduplication works -- Success
+4) create atleast two file with different content and check if lazy deduplication works -- Success
+5) create two files -> take snapshot -> print snapshot -> apply deduplication -> delete one file, create 3rd file -> restore snapshot -> check content -- success
+6) create two files -> apply deduplication -> take snapshort -> delete one file, create 3rd file -> restore snapshot -> check content --  success
+7) delete snapshots -- success
+8) create files. mount with correct encryption key and read file -- success
+9) create files. mount with incorrect encryption key and read file, it should not display content -- success
+10) mount with incorrect encryption key, copy existing file, log in with correct key, check content of copied file -- failed

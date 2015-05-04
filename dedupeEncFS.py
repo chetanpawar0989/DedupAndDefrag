@@ -31,10 +31,6 @@ def main():
 
    arguments = server.parse(['-o', 'use_ino,default_permissions,fsname=dedupeEncfs'] + sys.argv[1:])
 
-
-
-
-
    if arguments.mountpoint or not server.fuse_args.mount_expected():
     msg = "DedupeEncFS Filesystem initialized. mountpoint = " + arguments.mountpoint
     print msg
@@ -63,15 +59,15 @@ class dedupeEncFS(fuse.Fuse):
       self.dirtyPaths = {}    #contains key-value pair of {path:isFileChanged}
       self.blockDatabase = '~/.datastore.db'
       self.metaDatabase = '~/.metadata.sqlite3'
+      self.logFile = '~/log.txt'
+      self.logFilePath = os.path.expanduser(self.logFile)
       self.link_mode = stat.S_IFLNK | 0777
       self.nodes = {}
       self.cache_key = 0
       self.defaultFolderSize = 1024 * 4    #Default folder size = 4kb when created
       self.defaultFileSize = 0            #Default file size = 0kb when created
       self.hashFunction = getattr(hashlib, "md5")
-
-
-      self.parser.add_option('--key', dest='key', metavar='BYTES', default=" ", help="Enter the key to decrypt data")
+      self.parser.add_option('--key', dest='key', metavar='key', default=" ", help="Enter the key to decrypt data")
 
     except Exception, e:
       print 'Exception in __init__() method'
@@ -96,6 +92,7 @@ class dedupeEncFS(fuse.Fuse):
       tstart = datetime.datetime.now()
       self.blockDBPath = os.path.expanduser(self.blockDatabase)
       self.metaDBPath = os.path.expanduser(self.metaDatabase)
+
       self.key = self.cmdline[0].key
 
 
@@ -138,7 +135,7 @@ class dedupeEncFS(fuse.Fuse):
     check if user have access to particular path with given flag.
     """
     try:
-      #self.__write_log("Access","called")
+      self.__write_log("Access","called")
 
       hid, inodeNum = self.__getHidAndInode(path)
       if mode != os.F_OK and not self.__checkAccessInMetaData(inodeNum, mode):
@@ -196,7 +193,7 @@ class dedupeEncFS(fuse.Fuse):
     - update inode access, modified time
     """
     try:
-      #self.__write_log("utime","called")
+      self.__write_log("utime","called")
       inodeNum = self.__getHidAndInode(path)[1]
       atime, mtime = times
       self.conn.execute('UPDATE inodes SET atime = ?, mtime = ? WHERE inodeNum = ?' (atime, mtime, inodeNum,))
@@ -214,7 +211,7 @@ class dedupeEncFS(fuse.Fuse):
     - update inode access, modified time in nano seconds
     """
     try:
-      #self.__write_log("utimens","called")
+      self.__write_log("utimens","called")
       inodeNum = self.__getHidAndInode(path)[1]
       atime_ns = a_time.tv_sec + (a_time.tv_nsec / 1000000.0) #convert access time in nano seconds
       mtime_ns = m_time.tv_sec + (m_time.tv_nsec / 1000000.0) #convert modified time in nano seconds
@@ -231,7 +228,7 @@ class dedupeEncFS(fuse.Fuse):
     Called while opening a file. inode attribute will be passed when called from create() method.
     """
     try:
-      #self.__write_log("Open","called")
+      self.__write_log("Open","called on path" + path)
 
       if inode == None:
         inodeNum = self.__getHidAndInode(path)[1]
@@ -259,7 +256,7 @@ class dedupeEncFS(fuse.Fuse):
     Called while creating new file.
     """
     try:
-      #self.__write_log("Create","called on path:" + path)
+      self.__write_log("Create","called on path:" + path)
       try:
         res = self.open(path, flags, nested=True)
       except Exception, e:
@@ -438,7 +435,7 @@ class dedupeEncFS(fuse.Fuse):
     - read buffer from offset to length
     """
     try:
-      #self.__write_log("Read","called")
+      self.__write_log("Read","called on path" + path + " with length:" + str(length) + " and offset:" + str(offset))
       buf = self.__get_data_buffer(path)
       buf.seek(offset)
       data = buf.read(length)
@@ -500,7 +497,7 @@ class dedupeEncFS(fuse.Fuse):
     """
     try:
       #self.__write_log("unlink","called")
-      self.__removeFileOrFolder(path)
+      self.__removeFileOrFolder(path, calledFromUnlink=True)
       self.conn.commit()
       #self.__write_log("unlink","ended")
       return SUCCESS
@@ -516,9 +513,7 @@ class dedupeEncFS(fuse.Fuse):
     Change the name and location of file.
     """
     try:
-      #self.__write_log("rename","called with oldpath:" + oldPath + " and topath:" + toPath)
-      msg = "rename() called at " + str(datetime.datetime.now())
-      self.__logMessage(msg)
+      self.__write_log("rename","called with oldpath:" + oldPath + " and topath:" + toPath)
 
       try:
         #if toPath directory is different that fromPath directory then check if it not empty before deleting
@@ -527,14 +522,38 @@ class dedupeEncFS(fuse.Fuse):
         self.__write_log("rename","exception:file not empty" + str(e.errno) + " and ENOENT:" + str(ENOENT),e)
         if e.errno != ENOENT: raise
 
+      #if oldpath is present in logs, replace it with toPath
+      query = 'SELECT inodeNum FROM logs WHERE path = ?'
+      result = self.conn.execute(query, (sqlite3.Binary(oldPath),)).fetchone()
+      if result:
+          inodeNum = result[0]
+          self.__write_log("log added for path" + toPath,"with inode:" + str(inodeNum))
+          query = 'UPDATE logs SET path = ? WHERE inodeNum = ?'
+          self.conn.execute(query, (toPath, inodeNum))
+
       #creating new hard link --> equivalent to creating the new file
       self.link(oldPath, toPath)
 
       #deleting old file
       self.unlink(oldPath)
 
+      #if oldpath is present in dirtypaths, replace it with toPath
+      if oldPath in self.dirtyPaths:
+          self.dirtyPaths[toPath] = self.dirtyPaths[oldPath]
+          self.__write_log("Added","topath" + toPath + " in dirtypaths")
+          del self.dirtyPaths[oldPath]
+
+      #replace datablocks of oldpath with newpath
+      if oldPath in self.dataBuffer:
+          self.dataBuffer[toPath] = self.dataBuffer[oldPath]
+          self.__write_log("Added","topath" + toPath + " in databuffer")
+          del self.dataBuffer[oldPath]
+
+
+
+
       self.conn.commit()
-      #self.__write_log("rename","ended")
+      self.__write_log("rename","ended")
       return SUCCESS
     except Exception, e:
       self.__write_log("rename","exception",e)
@@ -625,14 +644,14 @@ class dedupeEncFS(fuse.Fuse):
     - write data at the offset
     """
     try:
-      #self.__write_log("write","called on path:" + path + " with data:" + data)
+      self.__write_log("write","called on path:" + path + " with data:" + data)
       length = len(data)
 
       buf = self.__get_data_buffer(path)
       buf.seek(offset)
       buf.write(data)
       self.dirtyPaths[path] = True
-      #self.__write_log("write","ended")
+      self.__write_log("added" + path,"path in dirtypath")
       return length
     except Exception, e:
       self.__write_log("write","exception",e)
@@ -643,7 +662,7 @@ class dedupeEncFS(fuse.Fuse):
 
   def release(self, path, flags):
     try:
-      #self.__write_log("release","called on path:" + path)
+      self.__write_log("release","called on path:" + path)
       if path in self.dataBuffer:
         buf = self.dataBuffer[path]
       else:
@@ -869,14 +888,14 @@ class dedupeEncFS(fuse.Fuse):
     return int(fnameId[0])
 
 
-  def __removeFileOrFolder(self, path, emptyCheck=False):
+  def __removeFileOrFolder(self, path, emptyCheck=False, calledFromUnlink=False):
     """
     removes file/folder from hierarchy table and decrement the nlink in inodes table.
     - if emptyCheck is true then we can't allow removing directory if directory is not empty.
     - else remove from hierarchy table and decremenet nlink in inodes table.
     - if deleted item is folder then decrement the parent folder nlink as well.
     """
-    self.__write_log("removeFileorFolder","called")
+    self.__write_log("removeFileorFolder","called on path" + path)
     hid, inodeNum = self.__getHidAndInode(path)
     if emptyCheck:
       query = """SELECT count(h.hid) FROM hierarchy h, inodes i WHERE h.parenthid = ?
@@ -887,11 +906,11 @@ class dedupeEncFS(fuse.Fuse):
         #self.__write_log("removeFileorFolder","exception, folder not empty for hid:" + str(hid) + " childCount:" + str(childCount))
         raise OSError, (ENOTEMPTY, os.strerror(ENOTEMPTY), path)
 
-    if path in self.dataBuffer:
-      del self.dataBuffer[path]
-
-    if path in self.dirtyPaths:
-      del self.dirtyPaths[path]
+    # if path in self.dataBuffer:
+    #   del self.dataBuffer[path]
+    #
+    # if path in self.dirtyPaths:
+    #   del self.dirtyPaths[path]
 
     # Delete from hierarchy table.
     query = 'DELETE FROM hierarchy WHERE hid = ?'
@@ -903,10 +922,11 @@ class dedupeEncFS(fuse.Fuse):
     self.conn.execute(query, (inodeNum,))
 
     # Decrease refCount of blocks if available for corresponding inode
-    query = """UPDATE hashValues SET refCount = refCount-1 WHERE hashId in
-            (SELECT hashId FROM fileBlocks WHERE inodeNum = ?)"""
-    self.__write_log("query:",query + " " + str(inodeNum))
-    self.conn.execute(query, (inodeNum,))
+    if not calledFromUnlink:
+        query = """UPDATE hashValues SET refCount = refCount-1 WHERE hashId in
+                (SELECT hashId FROM fileBlocks WHERE inodeNum = ?)"""
+        self.__write_log("query:",query + " " + str(inodeNum))
+        self.conn.execute(query, (inodeNum,))
 
     # Find if currently deleted item is folder from mode.
     query = 'SELECT mode from inodes WHERE inodeNum = ?'
@@ -1079,7 +1099,7 @@ class dedupeEncFS(fuse.Fuse):
       return length
 
   def __write_log(self,function_name,message="",exception=""):
-     f = open(os.path.expanduser('~/log.txt'),"a")
+     f = open(self.logFilePath,"a")
      if(exception == ""):
        f.write(function_name +"   " + message + "\n")
      else:

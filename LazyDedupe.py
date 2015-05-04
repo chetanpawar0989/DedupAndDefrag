@@ -430,7 +430,7 @@ class LazyDedupe:
         results = self.conn.execute(query).fetchall()
         print "hashId\thashkey \tRefCount\tLength"
         for row in results:
-            print str(row[0]) + "\t" + str(row[1]) + "\t" + str(row[2]) + "\t" + str(row[3])
+            print str(row[0]) + "\t" + str(row[1]) + "\t" + str(row[2]) + "\t\t" + str(row[3])
         self.__closeConnections()
 
 

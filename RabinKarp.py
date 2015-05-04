@@ -1,6 +1,7 @@
 
 import os
 from Crypto.Cipher import DES
+import hashlib.md5
 
 
 EncryptionKey = "wolfpack"
@@ -11,7 +12,7 @@ class RabinKarp:
         """
         Initialize variables you want to use.
         """
-        self.defaultLength = 10
+        self.defaultLength = 1024
         self.base = 256  #base used for hash calculation
         self.primary_number = 5915587277  # random long prime number
         self.RM = 1 # to calculate new hash from previous hash
@@ -31,6 +32,7 @@ class RabinKarp:
           are using previous hash and first character of previous data block to calculate new hash
         """
         #self.__write_log("ComputeHash", "called for length:" + str(len(data)))
+
         new_hash_value = 0
         if not ph:
             for index in range(len(data)):
