@@ -39,7 +39,7 @@ class LazyDedupe:
         self.rbkObj = RabinKarp()
 
 
-    def clearCache(self):
+    def clearCache(self, calledWithin=False):
         """
         Removes unnecessary inode and hashValues entries from metadata tables.
         Removes unused blocks from gdbm self.blocks
@@ -59,7 +59,9 @@ class LazyDedupe:
             self.conn.execute('DELETE FROM inodes WHERE nlink <= 0')
 
             # Removing unused hashBlock entries
-            hashKeys = self.conn.execute('SELECT hashValue FROM hashValues WHERE refCount <= 0').fetchall()
+            query = """SELECT h.hashValue FROM hashValues h WHERE h.refCount <= 0
+                       AND h.hashId not in (SELECT ha.hashId from hashValuesArch ha)"""
+            hashKeys = self.conn.execute(query).fetchall()
             for hk in hashKeys:
                 if hk[0] in self.blocks:
                     self.__write_log("Deleted hashkey " + str(hk[0]),"from datastore")
@@ -68,11 +70,14 @@ class LazyDedupe:
             self.blocks.reorganize()
             self.conn.execute('DELETE FROM hashValues WHERE refCount <= 0')
             self.conn.commit()
-            self.__closeConnections()
+            if not calledWithin:
+                self.__closeConnections()
             self.__write_log("clearCache in LazyDedupe","ended")
         except Exception, e:
             self.conn.rollback()
             self.__write_log("clearCache()","Exception", e)
+            if calledWithin:
+                raise
 
 
     def startDedupe(self):
@@ -85,7 +90,6 @@ class LazyDedupe:
                 2.2.2 insert in fileBlocks(inodeNum, last_insert_rowid(), blockNbr)
         3 delete all inode entries from logs table.
         """
-
         #1. Get inodes from logs table which are modified on which lazy dedupe will work.
         try:
             self.__write_log("startDedupe in LazyDedupe","called")
@@ -94,18 +98,10 @@ class LazyDedupe:
             query = 'SELECT inodeNum, path FROM logs'
             results = self.conn.execute(query).fetchall()
 
-
             if len(results) <= 0:
-                self.__write_log("Nothing to snapshot or dedupe","called")
+                self.__write_log("Nothing to dedupe in logs","called")
                 self.__write_log("startDedupe in LazyDedupe","ended")
                 return
-
-            # Creating snapshots
-            t = time.time()
-            query = 'INSERT INTO snapshots(snapId, startTime, endTime) VALUES (NULL, ?, ?)'
-            self.conn.execute(query, (t, t,))
-            snapId = self.conn.execute('SELECT last_insert_rowid() as snapId').fetchone()[0]
-            self.backUpTables(snapId)
 
             for row in results:
                 inodeNum = row[0]
@@ -145,15 +141,78 @@ class LazyDedupe:
             query = 'DELETE FROM logs'
             self.conn.execute(query)
             self.__write_log("startDedupe in LazyDedupe","ended")
+            self.__closeConnections()
+        except Exception, e:
+            self.conn.rollback()
+            self.__write_log("startDedupe()","Exception", e)
+
+
+    def __delete_old_fileBlockEntries(self, inodeNum):
+        try:
+            self.__write_log("__delete_old_fileBlockEntries in LazyDedupe","called")
+            query = 'SELECT hashId FROM fileBlocks WHERE inodeNum = ?'
+            results = self.conn.execute(query, (inodeNum,)).fetchall()
+            if len(results) > 0:
+                inClause = '('
+                for row in results:
+                    inClause = inClause + str(row[0]) + ','
+                inClause = inClause[:-1] + ')'
+
+                query = 'UPDATE hashValues SET refCount = refCount - 1 WHERE hashId in ' + inClause
+                self.conn.execute(query)
+
+            query = 'DELETE FROM fileBlocks WHERE inodeNum = ?'
+            self.conn.execute(query, (inodeNum,))
+            self.__write_log("__delete_old_fileBlockEntries in LazyDedupe","ended")
+        except Exception, e:
+            raise
+
+
+    def __get_data_buffer(self, inodeNum):
+        self.__write_log("get_data_buffer in LazyDedupe","called")
+
+        dataBuf = cStringIO.StringIO()
+
+        query = """SELECT h.hashValue, h.length from hashValues h, fileBlocks f WHERE f.inodeNum = ?
+                  AND f.hashId = h.hashId ORDER BY f.blockOrder ASC"""
+        resultList = self.conn.execute(query, (inodeNum,)).fetchall()
+        DESObj = DES.new(EncryptionKey, DES.MODE_ECB)
+
+        data = ""
+        for row in resultList:
+            tempData = DESObj.decrypt(self.blocks[row[0]])
+            tempData = tempData[0:row[1]]
+            data = data + tempData
+
+        dataBuf.write(data)
+        self.__write_log("get_data_buffer  in LazyDedupe","ended")
+        return dataBuf
+
+
+    def createSnapshot(self):
+        """
+        This method creates a snapshot of current file system.
+        """
+        try:
+            self.__write_log("createSnapshot","called")
+            # Creating snapshots
+            t = time.time()
+            query = 'INSERT INTO snapshots(snapId, startTime, endTime) VALUES (NULL, ?, ?)'
+            self.conn.execute(query, (t, t,))
+            snapId = self.conn.execute('SELECT last_insert_rowid() as snapId').fetchone()[0]
+
+            self.backUpTables(snapId)
+
             #Updating end time for snapshot creation
             t = time.time()
             query = 'UPDATE snapshots SET endTime = ? WHERE snapId = ?'
             self.conn.execute(query, (snapId, t,))
             self.conn.commit()
             self.__closeConnections()
+            self.__write_log("createSnapshot","ended")
         except Exception, e:
             self.conn.rollback()
-            self.__write_log("startDedupe()","Exception", e)
+            self.__write_log("createSnapshot()","Exception", e)
 
 
     def backUpTables(self, snapId):
@@ -186,63 +245,123 @@ class LazyDedupe:
 
             self.conn.commit()
             self.__write_log("backUpTables","ended")
+            self.__closeConnections()
         except Exception, e:
             self.conn.rollback()
             raise
 
 
-
-    def __delete_old_fileBlockEntries(self, inodeNum):
+    def deleteSnapshot(self, snapId):
+        """
+        This function deletes all the metadata from the archive table for particular snapshot.
+        Deletes its corresponding blocks from the gdbm database.
+        """
         try:
-            self.__write_log("__delete_old_fileBlockEntries in LazyDedupe","called")
-            query = 'SELECT hashId FROM fileBlocks WHERE inodeNum = ?'
-            results = self.conn.execute(query, (inodeNum,)).fetchall()
-            if len(results) > 0:
-                inClause = '('
-                for row in results:
-                    inClause = inClause + str(row[0]) + ','
-                inClause = inClause[:-1] + ')'
+            query = "DELETE FROM inodesArch WHERE snapId = ?"
+            self.conn.execute(query, (snapId,))
+            self.__write_log("", "Records from inodesArch deleted")
 
-                query = 'UPDATE hashValues SET refCount = refCount - 1 WHERE hashId in ' + inClause
-                self.conn.execute(query)
+            query = "DELETE FROM hierarchyArch WHERE snapId = ?"
+            self.conn.execute(query, (snapId,))
+            self.__write_log("", "Records from hierarchyArch deleted")
 
-            query = 'DELETE FROM fileBlocks WHERE inodeNum = ?'
-            self.conn.execute(query, (inodeNum,))
-            self.__write_log("__delete_old_fileBlockEntries in LazyDedupe","ended")
+            query = "DELETE FROM softlinksArch WHERE snapId = ?"
+            self.conn.execute(query, (snapId,))
+            self.__write_log("", "Records from softlinksArch deleted")
 
+            query = "DELETE FROM hashValuesArch WHERE snapId = ?"
+            self.conn.execute(query, (snapId,))
+            self.__write_log("", "Records from hashValuesArch deleted")
+
+            query = "DELETE FROM fileBlocksArch WHERE snapId = ?"
+            self.conn.execute(query, (snapId,))
+            self.__write_log("", "Records from fileBlocksArch deleted")
+
+            self.conn.commit()
+            self.clearCache(calledWithin=True)
+            self.__closeConnections()
+            self.__write_log("deleteSnapshot", "ended")
         except Exception, e:
+            self.conn.rollback()
+            self.__write_log("deleteSnapshot", "exception", e)
+
+
+    def restoreToSnapshot(self, snapId):
+        """
+        Copies the particular snapId tables to current metadata and restores it to particular snapshot.
+        """
+        #Check if snapshotId is correct.
+        self.__write_log("restoreToSnapshot", "called")
+        row = self.conn.execute('SELECT COUNT(*) as r FROM snapshots').fetchall()
+        if not row:
+            print 'Invalid snapshot id. Please choose the correct id from below  snapshots'
+            self.printSnapshots()
+            return
+        try:
+            #Create backup of current tables.
+            t = time.time()
+            query = 'INSERT INTO snapshots(snapId, startTime, endTime) VALUES (NULL, ?, ?)'
+            self.conn.execute(query, (t, t,))
+            newsnapId = self.conn.execute('SELECT last_insert_rowid() as snapId').fetchone()[0]
+            self.backUpTables(newsnapId)
+            print "Snapshot of current data created"
+
+            self.__restoreTables(snapId)
+            self.conn.commit()
+            self.__write_log("restoreToSnapshot", "ended")
+            self.__closeConnections()
+        except Exception, e:
+            self.conn.rollback()
+            self.__write_log("restoreToSnapshot", "exception", e)
+
+
+    def __restoreTables(self, snapId):
+        """
+        Copies given snapId tables from archive back to original metadata tables.
+        """
+        try:
+            self.__write_log("__restoreTables","called")
+            query = """SELET inodeNum, nlink, mode, uid, gid, dev, size, atime, mtime, ctime FROM inodesArch
+                       WHERE snapId = ?"""
+            results = self.conn.execute(query, (snapId,)).fetchall()
+            if len(results) > 0:
+                query = 'INSERT INTO inodes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                self.conn.executemany(query, results)
+
+            query = """SELET hid, parenthid, fnameId, inodeNum FROM hierarchyArch
+                       WHERE snapId = ?"""
+            results = self.conn.execute(query, (snapId,)).fetchall()
+            if len(results) > 0:
+                query = 'INSERT INTO hierarchy VALUES (?, ?, ?, ?)'
+                self.conn.executemany(query, results)
+
+            query = """SELET inodeNum, target FROM softlinksArch
+                       WHERE snapId = ?"""
+            results = self.conn.execute(query, (snapId,)).fetchall()
+            if len(results) > 0:
+                query = 'INSERT INTO softlinks VALUES (?, ?, ?)'
+                self.conn.executemany(query, results)
+
+            query = """SELET hashId, hashValue, refCount, length FROM hashValuesArch
+                       WHERE snapId = ?"""
+            results = self.conn.execute(query, (snapId,)).fetchall()
+            if len(results) > 0:
+                query = 'INSERT INTO hashValues VALUES (?, ?, ?, ?)'
+                self.conn.executemany(query, results)
+
+            query = """SELET inodeNum, hashId, blockOrder FROM fileBlocksArch
+                       WHERE snapId = ?"""
+            results = self.conn.execute(query, (snapId,)).fetchall()
+            if len(results) > 0:
+                query = 'INSERT INTO fileBlocks VALUES (?, ?, ?)'
+                self.conn.executemany(query, results)
+
+            self.conn.commit()
+            self.__write_log("__restoreTables","ended")
+        except Exception, e:
+            self.conn.rollback()
+            self.__write_log("__restoreTables", "exception", e)
             raise
-
-
-    def __get_data_buffer(self, inodeNum):
-        self.__write_log("get_data_buffer in LazyDedupe","called")
-
-        dataBuf = cStringIO.StringIO()
-
-        query = """SELECT h.hashValue, h.length from hashValues h, fileBlocks f WHERE f.inodeNum = ?
-                  AND f.hashId = h.hashId ORDER BY f.blockOrder ASC"""
-        resultList = self.conn.execute(query, (inodeNum,)).fetchall()
-        DESObj = DES.new(EncryptionKey, DES.MODE_ECB)
-
-        data = ""
-        for row in resultList:
-            tempData = DESObj.decrypt(self.blocks[row[0]])
-            tempData = tempData[0:row[1]]
-            data = data + tempData
-
-        dataBuf.write(data)
-        self.__write_log("get_data_buffer  in LazyDedupe","ended")
-        return dataBuf
-
-
-
-    def __write_log(self,function_name,message="",exception=None):
-        f = open('/home/chetanpawar0989/log.txt','a')
-        if not exception:
-            f.write(function_name +"   " + message + "\n")
-        else:
-            f.write(function_name +"   " + message + " " + exception.message + "\n")
-        f.close()
 
 
     def printSnapshots(self):
@@ -263,9 +382,15 @@ class LazyDedupe:
         self.__closeConnections()
 
 
-    def printFileBlocks(self):
-        query = """SELECT f.inodeNum, h.hashValue, h.refCount, h.length, f.blockOrder  FROM fileBlocks f, hashValues h
-                WHERE h.hashId = f.hashId order by f.inodeNum, f.blockOrder"""
+    def printFileBlocks(self, inodeNum=None):
+        query1 = """SELECT f.inodeNum, h.hashValue, h.refCount, h.length, f.blockOrder  FROM fileBlocks f, hashValues h
+                WHERE h.hashId = f.hashId """
+        query2 = " AND f.inodeNum = '" + str(inodeNum) + "'"
+        query3 = " order by f.inodeNum, f.blockOrder """
+        if inodeNum == None:
+            query = query1 + query3
+        else:
+            query = query1 + query2 + query3
         results = self.conn.execute(query).fetchall()
         print "inode\thashkey \tRefCount\tLength\tBlockOrder"
         for row in results:
@@ -281,6 +406,7 @@ class LazyDedupe:
             print str(row[0]) + "\t" + str(row[1]) + "\t" + str(row[2]) + "\t" + str(row[3])
         self.__closeConnections()
 
+
     def printInodes(self):
         query = 'SELECT inodeNum, nlink, size, atime, mtime, ctime FROM inodes'
         results = self.conn.execute(query).fetchall()
@@ -290,6 +416,39 @@ class LazyDedupe:
                   "\t" + str(datetime.fromtimestamp(float(row[3])))
         self.__closeConnections()
 
+
+    def printFSStats(self):
+        """
+        prints the file system statistics.
+        """
+        #print number of inodes used.
+        query = 'SELECT COUNT(inodeNum) as i FROM inodes WHERE nlink > 0'
+        ninodes = self.conn.execute(query).fetchone()[0]
+        print "Number of inodes used:" + str(ninodes)
+
+        #print total number of individual blocks
+        query = 'SELECT COUNT(hashId) as b FROM hashValues WHERE refCount > 0'
+        nblocks = self.conn.execute(query).fetchone()[0]
+        print "Number of variable sized blocks used:" + str(nblocks)
+
+        #Get actual size of database without deduplication
+        query = 'SELECT SUM(x) as y FROM (SELECT refCount * length as x FROM hashValues WHERE refCount > 0)'
+        apparentSize = self.conn.execute(query).fetchone()[0]
+        print "Apparant size without deduplication" + str(apparentSize)
+
+        #Get size of database after deduplication
+        query = 'SELECT SUM(length) as l FROM hashValues WHERE refCount > 0'
+        actualSize = self.conn.execute(query).fetchone()[0]
+        print "Actual size after deduplication" + str(actualSize)
+
+        #Get size of database after deduplication + snapshots data
+        datavfs = os.statvfs(self.blockDBPath)
+        totalSize = (datavfs.f_blocks * datavfs.f_frsize)
+        print "Actual size after deduplication + snapshots data" + str(totalSize)
+
+        self.__closeConnections()
+
+
     def __closeConnections(self):
         self.conn.commit()
         self.conn.close()
@@ -298,15 +457,56 @@ class LazyDedupe:
         gc.collect()
 
 
+    def printHelp(self):
+        msg = """Help: python LazyDedupe <function-name> <args>\n
+                 function-names:\n
+                 1. printLogs - To see logs \n
+                 2. printInodes - To print inode information\n
+                 3. printFileBlocks <fileInodes> - To print inode information of all files/particular file.
+                 4. printHashes - To print all hashKeys stored in hashValues table.
+                 5. startDedupe - To start Lazy deduplication process
+                 6. clearCache - To shrink database size after deduplication and clearing unnecessary tables.
+                 7. printSnapshots - To list all the available snapshots.
+                 8. createSnapshot - To create new snapshot
+                 9. deleteSnapshot <snapShotId> - To delete particular snapshot entries
+                 10.restoreToSnapshot <snapShotId> - To restore file system to particular snapshot.
+                 11.printFSStats - To print file system statistics
+                 12.printHelp - To see this help menu.
+              """
+        print msg
+
+
+    def __write_log(self,function_name,message="",exception=None):
+        f = open('/home/chetanpawar0989/log.txt','a')
+        if not exception:
+            f.write(function_name +"   " + message + "\n")
+        else:
+            f.write(function_name +"   " + message + " " + exception.message + "\n")
+        f.close()
+
+
 if __name__ == '__main__':
     dedupeObj = LazyDedupe()
-    if len(sys.argv) == 1 or len(sys.argv) > 2:
-        print "Please call only one function."
+    if len(sys.argv) < 2:
+        dedupeObj.printHelp()
+        sys.exit(1)
     funct = sys.argv[1]
     if hasattr(dedupeObj, funct):
         methodCall = getattr(dedupeObj, funct)
-        methodCall()
+        if funct in ('printLogs', 'printInodes', 'printFileBlocks', 'printHashes', 'clearCache', 'printHelp', 'printFSStats'):
+            if funct == 'printFileBlocks' and len(sys.argv) == 3:
+                    methodCall(sys.argv[2])
+            else:
+                methodCall()
+        else:
+            if len(sys.argv) == 3:
+                arg = sys.argv[2]
+                methodCall(arg)
+            else:
+                dedupeObj.printHelp()
     else:
         print "Invalid function name"
+        dedupeObj.printHelp()
+
 
 

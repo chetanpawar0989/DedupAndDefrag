@@ -3,8 +3,7 @@
   <component name="ChangeListManager">
     <list default="true" id="ed37b3e3-7c27-4c81-a060-03118afe2edc" name="Default" comment="">
       <change type="MODIFICATION" beforePath="$PROJECT_DIR$/LazyDedupe.py" afterPath="$PROJECT_DIR$/LazyDedupe.py" />
-      <change type="MODIFICATION" beforePath="$PROJECT_DIR$/RabinKarp.py" afterPath="$PROJECT_DIR$/RabinKarp.py" />
-      <change type="MODIFICATION" beforePath="$PROJECT_DIR$/dedupeEncFS.py" afterPath="$PROJECT_DIR$/dedupeEncFS.py" />
+      <change type="MODIFICATION" beforePath="$PROJECT_DIR$/temp.txt" afterPath="$PROJECT_DIR$/temp.txt" />
       <change type="MODIFICATION" beforePath="$PROJECT_DIR$/.idea/workspace.xml" afterPath="$PROJECT_DIR$/.idea/workspace.xml" />
     </list>
     <ignored path="project.iws" />
@@ -29,24 +28,12 @@
   </component>
   <component name="FileEditorManager">
     <leaf>
-      <file leaf-file-name="dedupeEncFS.py" pinned="false" current-in-tab="true">
+      <file leaf-file-name="dedupeEncFS.py" pinned="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/dedupeEncFS.py">
           <provider selected="true" editor-type-id="text-editor">
-            <state vertical-scroll-proportion="0.5427632" vertical-offset="0" max-vertical-offset="16245">
-              <caret line="22" column="26" selection-start-line="22" selection-start-column="26" selection-end-line="22" selection-end-column="26" />
+            <state vertical-scroll-proportion="-7.214286" vertical-offset="11108" max-vertical-offset="16440">
+              <caret line="754" column="12" selection-start-line="754" selection-start-column="4" selection-end-line="754" selection-end-column="12" />
               <folding />
-            </state>
-          </provider>
-        </entry>
-      </file>
-      <file leaf-file-name="LazyDedupe.py" pinned="false" current-in-tab="false">
-        <entry file="file://$PROJECT_DIR$/LazyDedupe.py">
-          <provider selected="true" editor-type-id="text-editor">
-            <state vertical-scroll-proportion="-9.892858" vertical-offset="3158" max-vertical-offset="4770">
-              <caret line="229" column="23" selection-start-line="229" selection-start-column="23" selection-end-line="229" selection-end-column="23" />
-              <folding>
-                <element signature="e#1#11#0" expanded="true" />
-              </folding>
             </state>
           </provider>
         </entry>
@@ -54,10 +41,22 @@
       <file leaf-file-name="RabinKarp.py" pinned="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/RabinKarp.py">
           <provider selected="true" editor-type-id="text-editor">
-            <state vertical-scroll-proportion="-33.642857" vertical-offset="993" max-vertical-offset="2895">
-              <caret line="129" column="49" selection-start-line="129" selection-start-column="49" selection-end-line="129" selection-end-column="49" />
+            <state vertical-scroll-proportion="-5.892857" vertical-offset="0" max-vertical-offset="2895">
+              <caret line="11" column="44" selection-start-line="11" selection-start-column="44" selection-end-line="11" selection-end-column="44" />
               <folding>
                 <element signature="e#1#10#0" expanded="true" />
+              </folding>
+            </state>
+          </provider>
+        </entry>
+      </file>
+      <file leaf-file-name="LazyDedupe.py" pinned="false" current-in-tab="true">
+        <entry file="file://$PROJECT_DIR$/LazyDedupe.py">
+          <provider selected="true" editor-type-id="text-editor">
+            <state vertical-scroll-proportion="0.4555921" vertical-offset="6818" max-vertical-offset="7770">
+              <caret line="473" column="54" selection-start-line="473" selection-start-column="54" selection-end-line="473" selection-end-column="54" />
+              <folding>
+                <element signature="e#1#11#0" expanded="true" />
               </folding>
             </state>
           </provider>
@@ -71,9 +70,9 @@
   <component name="IdeDocumentHistory">
     <option name="CHANGED_PATHS">
       <list>
-        <option value="$PROJECT_DIR$/LazyDedupe.py" />
-        <option value="$PROJECT_DIR$/dedupeEncFS.py" />
         <option value="$PROJECT_DIR$/RabinKarp.py" />
+        <option value="$PROJECT_DIR$/dedupeEncFS.py" />
+        <option value="$PROJECT_DIR$/LazyDedupe.py" />
       </list>
     </option>
   </component>
@@ -291,20 +290,10 @@
         </state>
       </provider>
     </entry>
-    <entry file="file://$PROJECT_DIR$/LazyDedupe.py">
-      <provider selected="true" editor-type-id="text-editor">
-        <state vertical-scroll-proportion="-9.892858" vertical-offset="3158" max-vertical-offset="4770">
-          <caret line="229" column="23" selection-start-line="229" selection-start-column="23" selection-end-line="229" selection-end-column="23" />
-          <folding>
-            <element signature="e#1#11#0" expanded="true" />
-          </folding>
-        </state>
-      </provider>
-    </entry>
     <entry file="file://$PROJECT_DIR$/RabinKarp.py">
       <provider selected="true" editor-type-id="text-editor">
-        <state vertical-scroll-proportion="-33.642857" vertical-offset="993" max-vertical-offset="2895">
-          <caret line="129" column="49" selection-start-line="129" selection-start-column="49" selection-end-line="129" selection-end-column="49" />
+        <state vertical-scroll-proportion="-5.892857" vertical-offset="0" max-vertical-offset="2895">
+          <caret line="11" column="44" selection-start-line="11" selection-start-column="44" selection-end-line="11" selection-end-column="44" />
           <folding>
             <element signature="e#1#10#0" expanded="true" />
           </folding>
@@ -313,9 +302,19 @@
     </entry>
     <entry file="file://$PROJECT_DIR$/dedupeEncFS.py">
       <provider selected="true" editor-type-id="text-editor">
-        <state vertical-scroll-proportion="0.5427632" vertical-offset="0" max-vertical-offset="16245">
-          <caret line="22" column="26" selection-start-line="22" selection-start-column="26" selection-end-line="22" selection-end-column="26" />
+        <state vertical-scroll-proportion="-7.214286" vertical-offset="11108" max-vertical-offset="16440">
+          <caret line="754" column="12" selection-start-line="754" selection-start-column="4" selection-end-line="754" selection-end-column="12" />
           <folding />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/LazyDedupe.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state vertical-scroll-proportion="0.4555921" vertical-offset="6818" max-vertical-offset="7770">
+          <caret line="473" column="54" selection-start-line="473" selection-start-column="54" selection-end-line="473" selection-end-column="54" />
+          <folding>
+            <element signature="e#1#11#0" expanded="true" />
+          </folding>
         </state>
       </provider>
     </entry>
