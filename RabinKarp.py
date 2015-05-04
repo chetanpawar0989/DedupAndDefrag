@@ -179,7 +179,7 @@ class RabinKarp:
 
 
     def __write_log(self,function_name,message="",exception=None):
-        f = open('/home/chetanpawar0989/log.txt','a')
+        f = open(os.path.expanduser('~/log.txt'),"a")
         if not exception:
             f.write(function_name +"   " + message + "\n")
         else:
