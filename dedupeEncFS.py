@@ -771,7 +771,7 @@ class dedupeEncFS(fuse.Fuse):
                 inClause = inClause[:-1] + ')'
 
                 query = 'UPDATE hashValues SET refCount = refCount - 1 WHERE hashId in ' + inClause
-                #self.__write_log("query=" + query,"")
+                self.__write_log("In __delete_old_fileBlockEntries query=" + query,"")
                 self.conn.execute(query)
 
             query = 'DELETE FROM fileBlocks WHERE inodeNum = ?'
@@ -903,8 +903,9 @@ class dedupeEncFS(fuse.Fuse):
     self.conn.execute(query, (inodeNum,))
 
     # Decrease refCount of blocks if available for corresponding inode
-    query = """UPDATE hashValues SET refCount = refCount-1 WHERE hashValue in
-            (SELECT hashValue FROM fileBlocks WHERE inodeNum = ?)"""
+    query = """UPDATE hashValues SET refCount = refCount-1 WHERE hashId in
+            (SELECT hashId FROM fileBlocks WHERE inodeNum = ?)"""
+    self.__write_log("query:",query + " " + str(inodeNum))
     self.conn.execute(query, (inodeNum,))
 
     # Find if currently deleted item is folder from mode.
@@ -1010,6 +1011,7 @@ class dedupeEncFS(fuse.Fuse):
         CREATE TABLE IF NOT EXISTS softlinksArch(snapId INTEGER, inodeNum INTEGER, target BLOB NOT NULL);
         CREATE TABLE IF NOT EXISTS hashValuesArch(snapId INTEGER, hashId INTEGER, hashValue INTEGER, refCount INTEGER NOT NULL, length INTEGER);
         CREATE TABLE IF NOT EXISTS fileBlocksArch(snapId INTEGER, inodeNum INTEGER, hashId INTEGER, blockOrder INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS logsArch(snapId INTEGER, inodeNum INTEGER NOT NULL, path BLOB);
 
         -- Insert default rows for root folder.
         INSERT INTO fileFolderNames (fnameId, fname) VALUES(1, '');
@@ -1077,13 +1079,13 @@ class dedupeEncFS(fuse.Fuse):
       return length
 
   def __write_log(self,function_name,message="",exception=""):
-   #   f = open('/home/chetanpawar0989/log.txt','a')
-   #   if(exception == ""):
-   #     f.write(function_name +"   " + message + "\n")
-   #   else:
-   #     f.write(function_name +"   " + message + " " + exception.message + "\n")
-   #   f.close()
-      pass
+     f = open('/home/chetanpawar0989/log.txt','a')
+     if(exception == ""):
+       f.write(function_name +"   " + message + "\n")
+     else:
+       f.write(function_name +"   " + message + " " + exception.message + "\n")
+     f.close()
+
 
 
 if __name__ == '__main__':

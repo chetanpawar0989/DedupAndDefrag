@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS fileBlocks(inodeNum INTEGER, hashId INTEGER, blockOrd
 
 CREATE TABLE IF NOT EXISTS logs(inodeNum INTEGER NOT NULL, path BLOB)
 
-CREATE TABLE IF NOT EXISTS snaphshots(snapId INTEGER PRIMARY KEY, startTime INTEGER, endTime Integer)
+CREATE TABLE IF NOT EXISTS snapshots(snapId INTEGER PRIMARY KEY, startTime INTEGER, endTime Integer)
 -- Creating snapshot tables:
 CREATE TABLE IF NOT EXISTS inodesArch(snapId INTEGER, inodeNum INTEGER, nlink INTEGER NOT NULL, mode INTEGER NOT NULL, uid INTEGER, gid INTEGER, dev INTEGER, size INTEGER, atime INTEGER, mtime INTEGER, ctime INTEGER);
 
@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS softlinksArch(snapId INTEGER, inodeNum INTEGER, targe
 CREATE TABLE IF NOT EXISTS hashValuesArch(snapId INTEGER, hashId INTEGER, hashValue INTEGER, refCount INTEGER NOT NULL, length INTEGER)
 
 CREATE TABLE IF NOT EXISTS fileBlocksArch(snapId INTEGER, inodeNum INTEGER, hashId INTEGER, blockOrder INTEGER NOT NULL)
+
+CREATE TABLE IF NOT EXISTS logsArch(snapId INTEGER, inodeNum INTEGER NOT NULL, path BLOB);
 
 
 ------------------------------------------------------------------------------------------------------------------
